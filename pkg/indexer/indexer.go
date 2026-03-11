@@ -38,7 +38,7 @@ func (idx *Indexer) IndexFile(filePath string) error {
 	hash := fmt.Sprintf("%x", md5.Sum(content))
 
 	// Insert file into database
-	fileID, err := idx.db.InsertFile(filePath, parseResult.Language, hash)
+	fileID, err := idx.db.InsertFile(filePath, string(parseResult.Language), hash)
 	if err != nil {
 		return fmt.Errorf("failed to insert file: %w", err)
 	}

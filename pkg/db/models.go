@@ -14,27 +14,40 @@ type File struct {
 
 // Entity represents a code entity (function, class, type, etc.)
 type Entity struct {
-	ID           int64  `gorm:"primaryKey"`
-	FileID       int64  `gorm:"index;not null"`
-	Name         string `gorm:"index;not null"`
-	Type         string `gorm:"index;not null"`
-	Kind         string
-	Signature    string
-	StartLine    int
-	EndLine      int
-	Documentation string
-	File         *File `gorm:"foreignKey:FileID"`
-	SourceRelations  []EntityRelation `gorm:"foreignKey:SourceEntityID;constraint:OnDelete:CASCADE"`
-	TargetRelations  []EntityRelation `gorm:"foreignKey:TargetEntityID;constraint:OnDelete:CASCADE"`
+	ID              int64  `gorm:"primaryKey"`
+	FileID          int64  `gorm:"index;not null"`
+	Name            string `gorm:"index;not null"`
+	Type            string `gorm:"index;not null"` // function, class, interface, type, method, etc.
+	Kind            string // specific kind: async_function, arrow_function, method, etc.
+	Signature       string
+	StartLine       int
+	EndLine         int
+	ColumnStart     int
+	ColumnEnd       int
+	Documentation   string
+
+	// Multi-language support fields
+	Parent          string // Parent entity name for nested entities (e.g., "ClassName" for methods)
+	Visibility      string `gorm:"index"` // public, private, protected, internal
+	Scope           string // file, class, module, global, local
+	Language        string `gorm:"index"` // go, python, javascript, typescript, java
+	Attributes      string // JSON: {decorators: [], typeParams: [], modifiers: [], etc.}
+
+	// Relationships
+	File                   *File `gorm:"foreignKey:FileID"`
+	SourceRelations        []EntityRelation `gorm:"foreignKey:SourceEntityID;constraint:OnDelete:CASCADE"`
+	TargetRelations        []EntityRelation `gorm:"foreignKey:TargetEntityID;constraint:OnDelete:CASCADE"`
 }
 
 // Dependency represents a file dependency (import/require)
 type Dependency struct {
 	ID           int64  `gorm:"primaryKey"`
 	SourceFileID int64  `gorm:"index;not null"`
-	TargetPath   string `gorm:"not null"`
-	ImportType   string
+	TargetPath   string `gorm:"not null"` // Import path as written in code
+	ImportType   string // import, require, from, include
 	LineNumber   int
+	Resolved     string // Resolved module/file path if determined
+	IsLocal      bool   // True if local module/relative import
 	SourceFile   *File `gorm:"foreignKey:SourceFileID"`
 }
 
