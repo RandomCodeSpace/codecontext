@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (e.g. v1.2.3)"
+        description: "Release version (e.g. v1.2.3, v1.2.3-alpha.1, v1.2.3-beta.2, v1.2.3-snapshot)"
         required: true
         type: string
 
@@ -18,8 +18,11 @@ jobs:
     steps:
       - name: Check version format
         run: |
-          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Error: version must match vMAJOR.MINOR.PATCH (e.g. v1.2.3)"
+          # Accepts: v1.2.3 | v1.2.3-alpha | v1.2.3-alpha.1 | v1.2.3-beta.2 | v1.2.3-snapshot
+          SEMVER_RE='^v[0-9]+\.[0-9]+\.[0-9]+(-((alpha|beta|snapshot)(\.[0-9]+)?))?$'
+          if [[ ! "${{ inputs.version }}" =~ $SEMVER_RE ]]; then
+            echo "Error: version must be vMAJOR.MINOR.PATCH with an optional pre-release label."
+            echo "Valid examples: v1.2.3  v1.2.3-alpha  v1.2.3-alpha.1  v1.2.3-beta.2  v1.2.3-snapshot"
             exit 1
           fi
 
@@ -96,4 +99,5 @@ jobs:
           tag_name: ${{ inputs.version }}
           name: ${{ inputs.version }}
           generate_release_notes: true
+          prerelease: ${{ contains(inputs.version, '-') }}
           files: dist/*
