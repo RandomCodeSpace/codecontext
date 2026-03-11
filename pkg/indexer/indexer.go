@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	gitignore "github.com/sabhiram/go-gitignore"
+
 	"github.com/RandomCodeSpace/codecontext/pkg/db"
 	"github.com/RandomCodeSpace/codecontext/pkg/parser"
 )
@@ -167,25 +169,99 @@ func (idx *Indexer) IndexFile(filePath string) error {
 	return nil
 }
 
+// ignoreEntry pairs a base directory with the compiled patterns from the
+// .gitignore / .ignore file found in that directory.
+type ignoreEntry struct {
+	base    string
+	matcher *gitignore.GitIgnore
+}
+
+// loadIgnoreFiles loads .gitignore and .ignore from dir (if present) and
+// returns a compiled matcher.  Returns nil when neither file exists.
+func loadIgnoreFiles(dir string) *gitignore.GitIgnore {
+	var lines []string
+	for _, name := range []string{".gitignore", ".ignore"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err == nil {
+			lines = append(lines, strings.Split(string(data), "\n")...)
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return gitignore.CompileIgnoreLines(lines...)
+}
+
 // IndexDirectory recursively indexes all source files in a directory using a
 // goroutine worker pool (one worker per CPU core) for parallel parsing.
+//
+// It respects .gitignore and .ignore files found at any level of the tree.
 func (idx *Indexer) IndexDirectory(dirPath string) error {
-	// Collect all source file paths first.
+	// ignoreEntries accumulates matchers as directories are visited.
+	// They are populated on first entry into a directory so that by the time
+	// files inside that directory are visited the rules are already in place.
+	var (
+		ignoreMu      sync.Mutex
+		ignoreEntries []ignoreEntry
+	)
+
+	addIgnores := func(dir string) {
+		m := loadIgnoreFiles(dir)
+		if m != nil {
+			ignoreMu.Lock()
+			ignoreEntries = append(ignoreEntries, ignoreEntry{base: dir, matcher: m})
+			ignoreMu.Unlock()
+			idx.log("  📋 Loaded ignore rules from %s", dir)
+		}
+	}
+
+	// isIgnored returns true when any ancestor-directory matcher matches path.
+	isIgnored := func(path string) bool {
+		ignoreMu.Lock()
+		entries := ignoreEntries
+		ignoreMu.Unlock()
+		for _, e := range entries {
+			rel, err := filepath.Rel(e.base, path)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				continue // path is not under this matcher's base
+			}
+			if e.matcher.MatchesPath(rel) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Collect all source file paths, respecting ignore rules along the way.
 	var paths []string
 	err := filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") && path != dirPath {
-				idx.log("  🚫 Skipping hidden directory: %s", path)
-				return filepath.SkipDir
+			// Load this directory's ignore files before checking its children.
+			addIgnores(path)
+
+			// Never descend into the root itself; only skip sub-directories.
+			if path != dirPath {
+				if strings.HasPrefix(d.Name(), ".") {
+					idx.log("  🚫 Skipping hidden directory: %s", path)
+					return filepath.SkipDir
+				}
+				switch d.Name() {
+				case "node_modules", "vendor", "__pycache__", "target", "build", "dist":
+					idx.log("  🚫 Skipping build/vendor directory: %s", path)
+					return filepath.SkipDir
+				}
+				if isIgnored(path) {
+					idx.log("  🚫 Ignored (gitignore): %s", path)
+					return filepath.SkipDir
+				}
 			}
-			switch d.Name() {
-			case "node_modules", "vendor", "__pycache__", "target", "build", "dist":
-				idx.log("  🚫 Skipping build/vendor directory: %s", path)
-				return filepath.SkipDir
-			}
+			return nil
+		}
+		if isIgnored(path) {
+			idx.log("  🚫 Ignored (gitignore): %s", path)
 			return nil
 		}
 		if isSourceFile(strings.ToLower(filepath.Ext(path))) {
