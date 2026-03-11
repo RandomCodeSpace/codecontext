@@ -487,7 +487,7 @@ func handleMCP(graphDB *string, args []string) {
 	defer database.Close()
 
 	idx := indexer.New(database)
-	mcpServer := mcp.New(idx)
+	mcpServer := mcp.New(idx, version)
 
 	if *useHTTP {
 		fmt.Fprintf(os.Stderr, "🔌 MCP HTTP server listening on http://localhost%s\n", *addr)
@@ -515,36 +515,25 @@ func handleMCP(graphDB *string, args []string) {
 
 		id := req["id"]
 		method, _ := req["method"].(string)
-
-		switch method {
-		case "initialize":
-			writeJSONRPCResult(id, map[string]interface{}{
-				"protocolVersion": "2024-11-05",
-				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
-				"serverInfo":      map[string]interface{}{"name": "codecontext", "version": version},
-			})
-		case "tools/list":
-			writeJSONRPCResult(id, map[string]interface{}{"tools": mcpServer.GetTools()})
-		case "tools/call":
-			params, _ := req["params"].(map[string]interface{})
-			toolName, _ := params["name"].(string)
-			arguments, _ := params["arguments"].(map[string]interface{})
-			if arguments == nil {
-				arguments = map[string]interface{}{}
-			}
-			result, err := mcpServer.CallTool(toolName, arguments)
-			if err != nil {
-				writeJSONRPCError(id, -32603, err.Error())
-				continue
-			}
-			writeJSONRPCResult(id, map[string]interface{}{
-				"content": []map[string]interface{}{
-					{"type": "text", "text": mcp.SerializeToolResult(result)},
-				},
-			})
-		default:
-			writeJSONRPCError(id, -32601, "Method not found")
+		params, _ := req["params"].(map[string]interface{})
+		if params == nil {
+			params = map[string]interface{}{}
 		}
+
+		result, err := mcpServer.Dispatch(method, params)
+		if err != nil {
+			code := -32603
+			if rpcE, ok := err.(*mcp.RPCError); ok {
+				code = rpcE.Code
+			}
+			writeJSONRPCError(id, code, err.Error())
+			continue
+		}
+		// Notifications (nil result, no id) expect no response.
+		if result == nil {
+			continue
+		}
+		writeJSONRPCResult(id, result)
 	}
 }
 
