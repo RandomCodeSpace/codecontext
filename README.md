@@ -181,6 +181,64 @@ This exposes the following MCP tools:
 - `query_call_graph`: Get the call graph for an entity
 - `query_dependencies`: Get dependencies for a file
 - `graph_stats`: Get statistics about the indexed code
+- `get_docs`: Get human-readable documentation for a project, file, or entity
+
+### Sample Use Case — Generate a Business Document with GitHub Copilot
+
+Once the MCP server is running and your codebase is indexed, paste this prompt
+into GitHub Copilot Chat (or any MCP-capable agent) to produce a full
+**Technical Business Overview** document:
+
+```
+You have access to a codecontext MCP server. Use its tools to gather
+information about this codebase and produce a structured business document.
+
+Step 1 — Gather data
+
+Run these MCP tools in order:
+
+1. graph_stats — get overall project stats (language breakdown, entity counts)
+2. get_docs with scope=project — get a high-level project overview
+3. get_docs with scope=file, format=Markdown — repeat for the 3–5 most
+   important files (entry points, core modules, public API surface)
+4. query_dependencies for each of those key files — understand coupling
+5. For any public-facing function you find, run query_call_graph to trace
+   how it works end-to-end
+
+Step 2 — Generate the document
+
+Using all data collected above, write a Technical Business Overview with:
+
+1. Executive Summary
+   - What the system does (2–3 sentences, non-technical)
+   - Primary value proposition
+
+2. System Architecture
+   - Languages and frameworks used (from graph_stats)
+   - Component breakdown (from project-level docs + file docs)
+   - A dependency map in Mermaid diagram format
+
+3. Public API / Capabilities
+   - Each major public function or module with: purpose, inputs, outputs
+   - Format as a table
+
+4. Integration Guide
+   - How to connect to / use this system
+   - Key entry points identified from call graphs
+
+5. Technical Debt & Risk
+   - Deeply coupled files (high dependency counts)
+   - Complexity hotspots (entities with large call graphs)
+
+6. Appendix — Entity Index
+   - Table of name | type | file | description
+
+Format the final document as Markdown.
+```
+
+Swap out the Step 2 template for other document types — API reference,
+onboarding guide, architecture decision record — while keeping Step 1
+unchanged.
 
 ## Database
 
