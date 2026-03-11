@@ -78,6 +78,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             cursor: pointer; display: flex; align-items: center; justify-content: center;
             transition: background .15s; }
 .ctrl-btn:hover { background: #2d3148; color: #e2e8f0; }
+#large-graph-warn { display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+                    background: #2d2408; border: 1px solid #854d0e; color: #fbbf24;
+                    border-radius: 8px; padding: 6px 14px; font-size: 0.78rem; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -115,6 +118,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 <div id="graph-area">
   <div id="loading">⏳ Loading graph…</div>
   <div id="error-msg"></div>
+  <div id="large-graph-warn"></div>
   <svg id="graph-svg">
     <defs>
       <marker id="arrow-defines" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
@@ -202,8 +206,10 @@ const REPULSION  = 3500;
 const LINK_DIST  = 90;
 const LINK_STR   = 0.06;
 const CENTER_STR = 0.005;
-const DAMPING    = 0.82;
+const DAMPING    = 0.6;     // was 0.82 — lower = less overshoot, faster settling
+const ALPHA_DECAY = 0.98;   // was 0.992 — faster cooldown (~185 ticks vs ~660)
 const ALPHA_MIN  = 0.005;
+const MAX_REPULSION_N = 400;  // skip O(n²) repulsion above this node count
 let alpha = 1.0;
 let animFrame = null;
 
@@ -223,22 +229,29 @@ function initSimulation() {
   tick();
 }
 
+let lastRenderMs = 0;
+
 function tick() {
   if (alpha < ALPHA_MIN) { animFrame = null; renderGraph(); return; }
+
+  const N = simNodes.length;
 
   // Reset forces
   simNodes.forEach(n => { n.fx = 0; n.fy = 0; });
 
-  // Repulsion (O(n²) — acceptable for typical graph sizes < 2000 nodes)
-  for (let i = 0; i < simNodes.length; i++) {
-    for (let j = i + 1; j < simNodes.length; j++) {
-      const a = simNodes[i], b = simNodes[j];
-      let dx = b.x - a.x || 0.01, dy = b.y - a.y || 0.01;
-      const d2 = dx*dx + dy*dy + 1;
-      const f = REPULSION / d2;
-      const fx = f * dx / Math.sqrt(d2), fy = f * dy / Math.sqrt(d2);
-      a.fx -= fx; a.fy -= fy;
-      b.fx += fx; b.fy += fy;
+  // Repulsion — skip for large graphs; O(n²) is too expensive beyond MAX_REPULSION_N.
+  // Link attraction + gravity still produces a useful layout without it.
+  if (N <= MAX_REPULSION_N) {
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
+        const a = simNodes[i], b = simNodes[j];
+        let dx = b.x - a.x || 0.01, dy = b.y - a.y || 0.01;
+        const d2 = dx*dx + dy*dy + 1;
+        const f = REPULSION / d2;
+        const fx = f * dx / Math.sqrt(d2), fy = f * dy / Math.sqrt(d2);
+        a.fx -= fx; a.fy -= fy;
+        b.fx += fx; b.fy += fy;
+      }
     }
   }
 
@@ -261,16 +274,23 @@ function tick() {
     n.fy += (cy - n.y) * CENTER_STR;
   });
 
-  // Integrate
+  // Integrate — multiply forces by alpha so the simulation cools as it runs.
+  // Without this, full-strength forces push nodes forever and they never settle.
   simNodes.forEach(n => {
     if (n.pinned) return;
-    n.vx = (n.vx + n.fx) * DAMPING;
-    n.vy = (n.vy + n.fy) * DAMPING;
+    n.vx = (n.vx + n.fx * alpha) * DAMPING;
+    n.vy = (n.vy + n.fy * alpha) * DAMPING;
     n.x += n.vx; n.y += n.vy;
   });
 
-  alpha *= 0.992;
-  renderGraph();
+  alpha *= ALPHA_DECAY;
+
+  // Throttle DOM updates: uncapped for small graphs; ~10 fps for large ones to
+  // avoid spending more time rebuilding SVG than running physics.
+  const now = performance.now();
+  const renderMs = N > MAX_REPULSION_N ? 100 : 0;
+  if (now - lastRenderMs >= renderMs) { renderGraph(); lastRenderMs = now; }
+
   animFrame = requestAnimationFrame(tick);
 }
 
@@ -518,6 +538,17 @@ document.getElementById('filter-input').addEventListener('input', (ev) => {
     document.getElementById('s-ent').textContent   = stats.entities ?? 0;
     document.getElementById('s-rel').textContent   = stats.relations ?? 0;
     document.getElementById('s-dep').textContent   = stats.dependencies ?? 0;
+
+    // For very large graphs, hide entity nodes by default so the initial
+    // layout only has to deal with file nodes.  The user can enable entity
+    // types individually via the type-filter pills.
+    const LARGE_GRAPH_N = 800;
+    if (allNodes.length > LARGE_GRAPH_N) {
+      allNodes.filter(n => n.group === 'entity').forEach(n => hiddenTypes.add(n.type));
+      const warn = document.getElementById('large-graph-warn');
+      warn.style.display = 'block';
+      warn.textContent = 'Large graph (' + allNodes.length + ' nodes) \u2014 entity nodes hidden for performance. Use type filters to show them.';
+    }
 
     buildTypeFilters();
     buildSimData();
