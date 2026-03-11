@@ -219,11 +219,12 @@ function initSimulation() {
   });
   alpha = 1.0;
   if (animFrame) cancelAnimationFrame(animFrame);
+  animFrame = null;
   tick();
 }
 
 function tick() {
-  if (alpha < ALPHA_MIN) { renderGraph(); return; }
+  if (alpha < ALPHA_MIN) { animFrame = null; renderGraph(); return; }
 
   // Reset forces
   simNodes.forEach(n => { n.fx = 0; n.fy = 0; });
@@ -309,6 +310,38 @@ function applyTransform() {
   zoomG.setAttribute('transform', 'translate('+transform.x+','+transform.y+') scale('+transform.k+')');
 }
 
+// ============================================================
+// Shared drag state — registered ONCE, not per render
+// ============================================================
+let dragNode = null, dragStart = null;
+
+// mousedown on a node <g> element sets dragNode via data-id lookup
+nodesG.addEventListener('mousedown', (ev) => {
+  const g = ev.target.closest('[data-id]');
+  if (!g) return;
+  const id = g.getAttribute('data-id');
+  const n = simNodes.find(n => n.id === id);
+  if (!n) return;
+  dragNode = n;
+  dragStart = { mx: ev.clientX, my: ev.clientY, nx: n.x, ny: n.y };
+  n.pinned = true;
+  ev.stopPropagation();
+});
+
+window.addEventListener('mousemove', (ev) => {
+  if (!dragNode) return;
+  const dx = (ev.clientX - dragStart.mx) / transform.k;
+  const dy = (ev.clientY - dragStart.my) / transform.k;
+  dragNode.x = dragStart.nx + dx;
+  dragNode.y = dragStart.ny + dy;
+  dragNode.vx = 0; dragNode.vy = 0;
+  alpha = Math.max(alpha, 0.3);
+  // Restart simulation if it has stopped (!animFrame means tick() exited cleanly).
+  if (!animFrame) tick();
+});
+
+window.addEventListener('mouseup', () => { dragNode = null; });
+
 function renderGraph() {
   // Render edges
   linksG.innerHTML = '';
@@ -358,26 +391,6 @@ function renderGraph() {
       ev.stopPropagation();
       selectNode(n);
     });
-
-    // Drag
-    let dragging = false, dragStart = null;
-    g.addEventListener('mousedown', (ev) => {
-      dragging = true;
-      dragStart = { mx: ev.clientX, my: ev.clientY, nx: n.x, ny: n.y };
-      n.pinned = true;
-      ev.stopPropagation();
-    });
-    window.addEventListener('mousemove', (ev) => {
-      if (!dragging) return;
-      const dx = (ev.clientX - dragStart.mx) / transform.k;
-      const dy = (ev.clientY - dragStart.my) / transform.k;
-      n.x = dragStart.nx + dx;
-      n.y = dragStart.ny + dy;
-      n.vx = 0; n.vy = 0;
-      alpha = Math.max(alpha, 0.3);
-      if (!animFrame || alpha < ALPHA_MIN) tick();
-    });
-    window.addEventListener('mouseup', () => { dragging = false; });
 
     nodesG.appendChild(g);
   });
