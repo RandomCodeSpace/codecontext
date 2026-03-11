@@ -271,6 +271,89 @@ enum Status {
 }
 `
 
+// javaMultiLineSource tests multi-line class declarations where '{' is NOT on
+// the same line as the 'class' keyword, and duplicate method names across
+// classes (the two bugs fixed in this change).
+const javaMultiLineSource = `
+package com.example;
+
+public class ServiceA
+    extends BaseService
+    implements Runnable {
+
+    public void run() {
+        // body
+    }
+
+    public String toString() {
+        return "A";
+    }
+}
+
+public class ServiceB implements Runnable {
+
+    public void run() {
+        // body
+    }
+
+    public String toString() {
+        return "B";
+    }
+}
+`
+
+func TestJavaParserMultiLine(t *testing.T) {
+	result, err := parser.Parse("multi.java", javaMultiLineSource)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Collect entities by qualified name (ClassName.methodName).
+	type key struct{ parent, name string }
+	byKey := make(map[key]*parser.Entity)
+	byName := make(map[string]*parser.Entity)
+	for _, e := range result.Entities {
+		byKey[key{e.Parent, e.Name}] = e
+		byName[e.Name] = e // last wins – used only for type checks
+	}
+
+	// Both classes must be detected.
+	for _, cls := range []string{"ServiceA", "ServiceB"} {
+		e, ok := byKey[key{"", cls}]
+		if !ok {
+			t.Errorf("missing class %q", cls)
+			continue
+		}
+		if e.Type != "class" {
+			t.Errorf("%s: want type=class, got %q", cls, e.Type)
+		}
+	}
+
+	// Both run() methods must have the correct parent.
+	for _, cls := range []string{"ServiceA", "ServiceB"} {
+		e, ok := byKey[key{cls, "run"}]
+		if !ok {
+			t.Errorf("missing %s.run()", cls)
+			continue
+		}
+		if e.Parent != cls {
+			t.Errorf("run(): want parent=%q, got %q", cls, e.Parent)
+		}
+	}
+
+	// Both toString() methods must have the correct parent.
+	for _, cls := range []string{"ServiceA", "ServiceB"} {
+		e, ok := byKey[key{cls, "toString"}]
+		if !ok {
+			t.Errorf("missing %s.toString()", cls)
+			continue
+		}
+		if e.Parent != cls {
+			t.Errorf("toString(): want parent=%q, got %q", cls, e.Parent)
+		}
+	}
+}
+
 func TestJavaParser(t *testing.T) {
 	result, err := parser.Parse("example.java", javaSource)
 	if err != nil {

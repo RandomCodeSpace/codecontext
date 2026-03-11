@@ -99,6 +99,17 @@ func (idx *Indexer) IndexFile(filePath string) error {
 		return fmt.Errorf("failed to insert file: %w", err)
 	}
 
+	// qualKey returns a collision-free map key: "ClassName.methodName" for
+	// child entities, plain "Name" for top-level ones.  This prevents methods
+	// with the same name in different classes (e.g. toString, equals,
+	// constructors) from overwriting each other in the lookup map.
+	qualKey := func(parent, name string) string {
+		if parent != "" {
+			return parent + "." + name
+		}
+		return name
+	}
+
 	entityByName := make(map[string]int64)
 	for _, entity := range parseResult.Entities {
 		entID, err := idx.db.InsertEntity(
@@ -119,8 +130,9 @@ func (idx *Indexer) IndexFile(filePath string) error {
 			idx.log("    ⚠️  Could not insert entity %q: %v", entity.Name, err)
 			continue
 		}
-		if _, exists := entityByName[entity.Name]; !exists {
-			entityByName[entity.Name] = entID
+		key := qualKey(entity.Parent, entity.Name)
+		if _, exists := entityByName[key]; !exists {
+			entityByName[key] = entID
 		}
 		idx.log("      ✅ Entity: [%s] %s (lines %d-%d)", entity.Type, entity.Name, entity.StartLine, entity.EndLine)
 	}
@@ -131,8 +143,8 @@ func (idx *Indexer) IndexFile(filePath string) error {
 		if entity.Parent == "" {
 			continue
 		}
-		parentID, parentOK := entityByName[entity.Parent]
-		childID, childOK := entityByName[entity.Name]
+		parentID, parentOK := entityByName[qualKey("", entity.Parent)]
+		childID, childOK := entityByName[qualKey(entity.Parent, entity.Name)]
 		if !parentOK || !childOK {
 			continue
 		}
