@@ -12,6 +12,8 @@ import (
 
 	gitignore "github.com/sabhiram/go-gitignore"
 
+	"gorm.io/gorm"
+
 	"github.com/RandomCodeSpace/codecontext/pkg/db"
 	"github.com/RandomCodeSpace/codecontext/pkg/parser"
 )
@@ -92,14 +94,9 @@ func (idx *Indexer) IndexFile(filePath string) error {
 	idx.log("    🔍 Parsed: %d entities, %d imports (lang=%s)",
 		len(parseResult.Entities), len(parseResult.Dependencies), parseResult.Language)
 
-	// --- DB writes (serialised) ---
+	// --- DB writes (serialised, wrapped in a single transaction) ---
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-
-	fileID, err := idx.db.InsertFile(filePath, string(parseResult.Language), hash)
-	if err != nil {
-		return fmt.Errorf("failed to insert file: %w", err)
-	}
 
 	// qualKey returns a collision-free map key: "ClassName.methodName" for
 	// child entities, plain "Name" for top-level ones.  This prevents methods
@@ -112,61 +109,72 @@ func (idx *Indexer) IndexFile(filePath string) error {
 		return name
 	}
 
-	entityByName := make(map[string]int64)
-	for _, entity := range parseResult.Entities {
-		entID, err := idx.db.InsertEntity(
-			fileID,
-			entity.Name,
-			entity.Type,
-			entity.Kind,
-			entity.Signature,
-			entity.StartLine,
-			entity.EndLine,
-			entity.Docs,
-			entity.Parent,
-			entity.Visibility,
-			entity.Scope,
-			string(parseResult.Language),
-		)
+	txErr := idx.db.GetDB().Transaction(func(tx *gorm.DB) error {
+		txDB := idx.db.WithTx(tx)
+
+		fileID, err := txDB.InsertFile(filePath, string(parseResult.Language), hash)
 		if err != nil {
-			idx.log("    ⚠️  Could not insert entity %q: %v", entity.Name, err)
-			continue
+			return fmt.Errorf("failed to insert file: %w", err)
 		}
-		key := qualKey(entity.Parent, entity.Name)
-		if _, exists := entityByName[key]; !exists {
-			entityByName[key] = entID
-		}
-		idx.log("      ✅ Entity: [%s] %s (lines %d-%d)", entity.Type, entity.Name, entity.StartLine, entity.EndLine)
-	}
 
-	// Build "defines" relations: parent entity → child entity.
-	relationCount := 0
-	for _, entity := range parseResult.Entities {
-		if entity.Parent == "" {
-			continue
+		entityByName := make(map[string]int64)
+		for _, entity := range parseResult.Entities {
+			entID, err := txDB.InsertEntity(
+				fileID,
+				entity.Name,
+				entity.Type,
+				entity.Kind,
+				entity.Signature,
+				entity.StartLine,
+				entity.EndLine,
+				entity.Docs,
+				entity.Parent,
+				entity.Visibility,
+				entity.Scope,
+				string(parseResult.Language),
+			)
+			if err != nil {
+				idx.log("    ⚠️  Could not insert entity %q: %v", entity.Name, err)
+				continue
+			}
+			key := qualKey(entity.Parent, entity.Name)
+			if _, exists := entityByName[key]; !exists {
+				entityByName[key] = entID
+			}
+			idx.log("      ✅ Entity: [%s] %s (lines %d-%d)", entity.Type, entity.Name, entity.StartLine, entity.EndLine)
 		}
-		parentID, parentOK := entityByName[qualKey("", entity.Parent)]
-		childID, childOK := entityByName[qualKey(entity.Parent, entity.Name)]
-		if !parentOK || !childOK {
-			continue
-		}
-		if _, err := idx.db.InsertEntityRelation(parentID, childID, "defines", entity.StartLine, ""); err != nil {
-			idx.log("    ⚠️  Could not insert relation %q→%q: %v", entity.Parent, entity.Name, err)
-		} else {
-			relationCount++
-		}
-	}
-	if relationCount > 0 {
-		idx.log("    🔗 Created %d defines relations", relationCount)
-	}
 
-	for _, dep := range parseResult.Dependencies {
-		if _, err := idx.db.InsertDependency(fileID, dep.Path, dep.Type, dep.LineNumber); err != nil {
-			idx.log("    ⚠️  Could not insert dependency %q: %v", dep.Path, err)
+		// Build "defines" relations: parent entity → child entity.
+		relationCount := 0
+		for _, entity := range parseResult.Entities {
+			if entity.Parent == "" {
+				continue
+			}
+			parentID, parentOK := entityByName[qualKey("", entity.Parent)]
+			childID, childOK := entityByName[qualKey(entity.Parent, entity.Name)]
+			if !parentOK || !childOK {
+				continue
+			}
+			if _, err := txDB.InsertEntityRelation(parentID, childID, "defines", entity.StartLine, ""); err != nil {
+				idx.log("    ⚠️  Could not insert relation %q→%q: %v", entity.Parent, entity.Name, err)
+			} else {
+				relationCount++
+			}
 		}
-	}
+		if relationCount > 0 {
+			idx.log("    🔗 Created %d defines relations", relationCount)
+		}
 
-	return nil
+		for _, dep := range parseResult.Dependencies {
+			if _, err := txDB.InsertDependency(fileID, dep.Path, dep.Type, dep.LineNumber); err != nil {
+				idx.log("    ⚠️  Could not insert dependency %q: %v", dep.Path, err)
+			}
+		}
+
+		return nil
+	})
+
+	return txErr
 }
 
 // ignoreEntry pairs a base directory with the compiled patterns from the
@@ -328,7 +336,7 @@ func workers() int {
 func isSourceFile(ext string) bool {
 	return map[string]bool{
 		".go": true, ".js": true, ".ts": true, ".jsx": true, ".tsx": true,
-		".py": true, ".java": true, ".c": true, ".cpp": true, ".h": true, ".rs": true,
+		".py": true, ".java": true,
 	}[ext]
 }
 

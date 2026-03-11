@@ -313,6 +313,7 @@ function buildSimData() {
     e._sNode = nodeById[e.source];
     e._tNode = nodeById[e.target];
   });
+  markRebuild();
 }
 
 // ============================================================
@@ -362,24 +363,36 @@ window.addEventListener('mousemove', (ev) => {
 
 window.addEventListener('mouseup', () => { dragNode = null; });
 
-function renderGraph() {
-  // Render edges
+// ---- Retained-mode SVG rendering ----
+// Instead of destroying and recreating all DOM elements every tick, we keep
+// persistent SVG elements keyed by node/edge identity and only update the
+// positional attributes (cx, cy, x1, y1, …) that change each frame.
+
+let svgNodeEls = new Map();   // id → {g, circle, text}
+let svgEdgeEls = [];          // [{line, edge}]
+let needsRebuild = true;      // full rebuild on data change / selection
+
+function markRebuild() { needsRebuild = true; }
+
+function rebuildSVG() {
+  // Edges
   linksG.innerHTML = '';
+  svgEdgeEls = [];
   simEdges.forEach(e => {
     if (!e._sNode || !e._tNode) return;
-    if (e.type === 'contains') return; // hide clutter
+    if (e.type === 'contains') return;
     const line = document.createElementNS('http://www.w3.org/2000/svg','line');
-    line.setAttribute('x1', e._sNode.x); line.setAttribute('y1', e._sNode.y);
-    line.setAttribute('x2', e._tNode.x); line.setAttribute('y2', e._tNode.y);
     line.setAttribute('class', 'link ' + e.type);
     if (e.type === 'defines' || e.type === 'imports') {
       line.setAttribute('marker-end', 'url(#arrow-' + e.type + ')');
     }
     linksG.appendChild(line);
+    svgEdgeEls.push({line, edge: e});
   });
 
-  // Render nodes
+  // Nodes
   nodesG.innerHTML = '';
+  svgNodeEls = new Map();
   simNodes.forEach(n => {
     const g = document.createElementNS('http://www.w3.org/2000/svg','g');
     g.setAttribute('class', 'node');
@@ -388,17 +401,15 @@ function renderGraph() {
     const circle = document.createElementNS('http://www.w3.org/2000/svg','circle');
     const r = radiusFor(n);
     circle.setAttribute('r', r);
-    circle.setAttribute('cx', n.x); circle.setAttribute('cy', n.y);
     circle.setAttribute('fill', colorFor(n));
+    circle.setAttribute('fill-opacity', '0.85');
     circle.setAttribute('stroke', n.id === selectedId ? '#fff' : colorFor(n));
     circle.setAttribute('stroke-opacity', n.id === selectedId ? '1' : '0.6');
-    circle.setAttribute('fill-opacity', '0.85');
     g.appendChild(circle);
 
+    let text = null;
     if (showLabels) {
-      const text = document.createElementNS('http://www.w3.org/2000/svg','text');
-      text.setAttribute('x', n.x + r + 4);
-      text.setAttribute('y', n.y + 4);
+      text = document.createElementNS('http://www.w3.org/2000/svg','text');
       text.setAttribute('font-size', n.group === 'file' ? '11' : '10');
       text.setAttribute('fill', '#cbd5e1');
       text.setAttribute('opacity', '0.85');
@@ -406,13 +417,33 @@ function renderGraph() {
       g.appendChild(text);
     }
 
-    // Click to select
-    g.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      selectNode(n);
-    });
-
     nodesG.appendChild(g);
+    svgNodeEls.set(n.id, {g, circle, text, radius: r});
+  });
+  needsRebuild = false;
+}
+
+function renderGraph() {
+  if (needsRebuild) rebuildSVG();
+
+  // Update edge positions
+  svgEdgeEls.forEach(({line, edge}) => {
+    const s = edge._sNode, t = edge._tNode;
+    if (!s || !t) return;
+    line.setAttribute('x1', s.x); line.setAttribute('y1', s.y);
+    line.setAttribute('x2', t.x); line.setAttribute('y2', t.y);
+  });
+
+  // Update node positions
+  simNodes.forEach(n => {
+    const el = svgNodeEls.get(n.id);
+    if (!el) return;
+    el.circle.setAttribute('cx', n.x);
+    el.circle.setAttribute('cy', n.y);
+    if (el.text) {
+      el.text.setAttribute('x', n.x + el.radius + 4);
+      el.text.setAttribute('y', n.y + 4);
+    }
   });
 }
 
@@ -421,6 +452,7 @@ function renderGraph() {
 // ============================================================
 function selectNode(n) {
   selectedId = n.id;
+  markRebuild();
   renderGraph();
   const dc = document.getElementById('detail-content');
   let html = '';
@@ -451,6 +483,7 @@ function shortPath(p) {
 
 svg.addEventListener('click', () => {
   selectedId = null;
+  markRebuild();
   renderGraph();
   document.getElementById('detail-content').innerHTML = '<span style="color:#475569">Click a node for details</span>';
 });
@@ -487,7 +520,7 @@ document.getElementById('btn-zoom-in').onclick  = () => { transform.k *= 1.2; ap
 document.getElementById('btn-zoom-out').onclick = () => { transform.k /= 1.2; applyTransform(); };
 document.getElementById('btn-reset').onclick    = () => { transform = {x:0,y:0,k:1}; applyTransform(); };
 document.getElementById('btn-toggle-labels').onclick = () => {
-  showLabels = !showLabels; renderGraph();
+  showLabels = !showLabels; markRebuild(); renderGraph();
 };
 
 // ============================================================

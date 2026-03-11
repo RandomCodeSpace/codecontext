@@ -321,7 +321,6 @@ func (p *PythonParser) Parse(filePath string, content string) (*ParseResult, err
 	}
 
 	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
 
 	// Scope stack: tracks open def/class blocks.
 	var stack []scopeEntry
@@ -472,8 +471,7 @@ func (p *PythonParser) Parse(filePath string, content string) (*ParseResult, err
 		if end < result.Entities[e.entityIdx].StartLine {
 			end = result.Entities[e.entityIdx].StartLine
 		}
-		result.Entities[e.entityIdx].EndLine = totalLines
-		_ = end
+		result.Entities[e.entityIdx].EndLine = end
 	}
 
 	return result, nil

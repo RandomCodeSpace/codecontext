@@ -80,7 +80,13 @@ func (EntityRelation) TableName() string {
 	return "entity_relations"
 }
 
-// GetDatabase returns the underlying GORM database instance
+// GetDB returns the underlying GORM database instance.
 func (db *Database) GetDB() *gorm.DB {
 	return db.conn
+}
+
+// WithTx returns a shallow copy of Database that uses the given transaction
+// instead of the underlying connection.
+func (db *Database) WithTx(tx *gorm.DB) *Database {
+	return &Database{conn: tx}
 }
