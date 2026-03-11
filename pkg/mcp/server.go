@@ -6,10 +6,31 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/RandomCodeSpace/codecontext/pkg/db"
 	"github.com/RandomCodeSpace/codecontext/pkg/indexer"
+)
+
+// RPCError is a JSON-RPC error with an explicit code.
+// Dispatch returns this so transports can use the right HTTP/JSON-RPC code.
+type RPCError struct {
+	Code    int
+	Message string
+}
+
+func (e *RPCError) Error() string { return e.Message }
+
+// rpcErr is a convenience constructor.
+func rpcErr(code int, msg string, args ...interface{}) *RPCError {
+	return &RPCError{Code: code, Message: fmt.Sprintf(msg, args...)}
+}
+
+const (
+	codeParseError     = -32700
+	codeMethodNotFound = -32601
+	codeInternalError  = -32603
 )
 
 // Server is the MCP server.  It is transport-agnostic; callers drive it via
@@ -172,6 +193,12 @@ func (s *Server) Dispatch(method string, params map[string]interface{}) (interfa
 }
 
 func (s *Server) dispatch(method string, params map[string]interface{}) (interface{}, error) {
+	// Notifications are one-way: the client expects no response.
+	// Return nil, nil to signal "send nothing".
+	if strings.HasPrefix(method, "notifications/") {
+		return nil, nil
+	}
+
 	switch method {
 	case "initialize":
 		return map[string]interface{}{
@@ -191,7 +218,7 @@ func (s *Server) dispatch(method string, params map[string]interface{}) (interfa
 		}
 		result, err := s.CallTool(toolName, arguments)
 		if err != nil {
-			return nil, err
+			return nil, rpcErr(codeInternalError, "%s", err.Error())
 		}
 		return map[string]interface{}{
 			"content": []map[string]interface{}{
@@ -200,7 +227,7 @@ func (s *Server) dispatch(method string, params map[string]interface{}) (interfa
 		}, nil
 
 	default:
-		return nil, fmt.Errorf("method not found: %s", method)
+		return nil, rpcErr(codeMethodNotFound, "method not found: %s", method)
 	}
 }
 
@@ -370,23 +397,15 @@ func (s *Server) docsForFile(path, formatHint string) (interface{}, error) {
 		return nil, fmt.Errorf("name (file path) is required for scope=file")
 	}
 
-	// Get file by path via indexer files list.
-	files, err := s.indexer.GetAllFiles()
+	f, err := s.indexer.GetFileByPath(path)
 	if err != nil {
 		return nil, err
 	}
-	var fileID int64
-	for _, f := range files {
-		if f.Path == path {
-			fileID = f.ID
-			break
-		}
-	}
-	if fileID == 0 {
+	if f == nil {
 		return nil, fmt.Errorf("file %q not found in index", path)
 	}
 
-	ents, err := s.indexer.GetEntitiesByFile(fileID)
+	ents, err := s.indexer.GetEntitiesByFile(f.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -501,13 +520,21 @@ func (s *Server) httpMCP(w http.ResponseWriter, r *http.Request) {
 		params = map[string]interface{}{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-
 	result, err := s.Dispatch(method, params)
 	if err != nil {
-		s.writeHTTPError(w, id, -32603, err.Error())
+		code := codeInternalError
+		if rpcE, ok := err.(*RPCError); ok {
+			code = rpcE.Code
+		}
+		s.writeHTTPError(w, id, code, err.Error())
 		return
 	}
+	// Notifications produce nil result — send 204 (no response body).
+	if result == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	s.writeHTTPResult(w, id, result)
 }
 

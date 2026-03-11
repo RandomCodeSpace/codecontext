@@ -522,7 +522,15 @@ func handleMCP(graphDB *string, args []string) {
 
 		result, err := mcpServer.Dispatch(method, params)
 		if err != nil {
-			writeJSONRPCError(id, -32603, err.Error())
+			code := -32603
+			if rpcE, ok := err.(*mcp.RPCError); ok {
+				code = rpcE.Code
+			}
+			writeJSONRPCError(id, code, err.Error())
+			continue
+		}
+		// Notifications (nil result, no id) expect no response.
+		if result == nil {
 			continue
 		}
 		writeJSONRPCResult(id, result)

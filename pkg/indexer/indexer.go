@@ -365,7 +365,8 @@ func (idx *Indexer) GetAllFiles() ([]*db.File, error)              { return idx.
 func (idx *Indexer) GetAllEntities() ([]*db.Entity, error)         { return idx.db.GetAllEntities() }
 func (idx *Indexer) GetAllRelations() ([]*db.EntityRelation, error) { return idx.db.GetAllRelations() }
 func (idx *Indexer) GetAllDependencies() ([]*db.Dependency, error)  { return idx.db.GetAllDependencies() }
-func (idx *Indexer) GetFileByID(id int64) (*db.File, error)        { return idx.db.GetFileByID(id) }
+func (idx *Indexer) GetFileByID(id int64) (*db.File, error)         { return idx.db.GetFileByID(id) }
+func (idx *Indexer) GetFileByPath(path string) (*db.File, error)    { return idx.db.GetFileByPath(path) }
 func (idx *Indexer) GetEntitiesByFile(fileID int64) ([]*db.Entity, error) {
 	return idx.db.GetEntitiesByFile(fileID)
 }
