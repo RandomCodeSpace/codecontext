@@ -167,17 +167,24 @@ func (p *JavaParser) Parse(filePath string, content string) (*ParseResult, error
 		return braceStack[len(braceStack)-1].isType
 	}
 
-	lineEntityIdx := -1
-	lineIsType := false
-	linePendingType := ""
+	// pendingEntityIdx/pendingIsType/pendingTypeName carry a declaration forward
+	// across lines until its opening '{' is found.  This handles multi-line
+	// declarations such as:
+	//
+	//   public class Foo
+	//       extends Bar
+	//       implements Baz {   ← '{' is here, not on the "class" line
+	//
+	// Without carry-forward the brace frame would be pushed with isType=false,
+	// making insideTypeBody() return false for the entire class body and causing
+	// zero methods (and therefore zero relations) to be detected.
+	pendingEntityIdx := -1
+	pendingIsType := false
+	pendingTypeName := ""
 
 	for lineIdx, line := range lines {
 		lineNum := lineIdx + 1
 		trimmed := strings.TrimSpace(line)
-
-		lineEntityIdx = -1
-		lineIsType = false
-		linePendingType = ""
 
 		// ---- import declaration ----
 		if strings.HasPrefix(trimmed, "import ") {
@@ -211,36 +218,37 @@ func (p *JavaParser) Parse(filePath string, content string) (*ParseResult, error
 				EndLine:   lineNum,
 				Parent:    parent,
 			})
-			lineEntityIdx = entityIdx
-			lineIsType = true
-			linePendingType = name
-		}
-
-		// ---- method declarations (only inside a type body) ----
-		if lineEntityIdx < 0 && insideTypeBody() {
+			pendingEntityIdx = entityIdx
+			pendingIsType = true
+			pendingTypeName = name
+		} else if insideTypeBody() {
+			// ---- method declarations (only inside a type body) ----
 			if ent, ok := matchMethodDecl(trimmed, currentType()); ok {
 				ent.StartLine = lineNum
 				ent.EndLine = lineNum
 				entityIdx := len(result.Entities)
 				result.Entities = append(result.Entities, ent)
-				lineEntityIdx = entityIdx
+				pendingEntityIdx = entityIdx
+				pendingIsType = false
+				pendingTypeName = ""
 			}
 		}
 
-		// ---- brace tracking ----
+		// ---- brace / semicolon tracking ----
 		for _, ch := range line {
 			if ch == '{' {
 				frame := braceFrame{
 					openLine:  lineNum,
-					entityIdx: lineEntityIdx,
-					isType:    lineIsType,
-					typeName:  linePendingType,
+					entityIdx: pendingEntityIdx,
+					isType:    pendingIsType,
+					typeName:  pendingTypeName,
 				}
 				braceStack = append(braceStack, frame)
-				// Only associate the entity with the first '{' on the line.
-				lineEntityIdx = -1
-				lineIsType = false
-				linePendingType = ""
+				// Consume the pending declaration; subsequent '{' on the same
+				// line (e.g. anonymous blocks) are unrelated.
+				pendingEntityIdx = -1
+				pendingIsType = false
+				pendingTypeName = ""
 			} else if ch == '}' {
 				if len(braceStack) > 0 {
 					frame := braceStack[len(braceStack)-1]
@@ -249,6 +257,14 @@ func (p *JavaParser) Parse(filePath string, content string) (*ParseResult, error
 						result.Entities[frame.entityIdx].EndLine = lineNum
 					}
 				}
+			} else if ch == ';' {
+				// A ';' before any '{' on this line means the pending
+				// declaration has no body (abstract method, interface method
+				// signature, field).  Clear the pending state so we do not
+				// accidentally attach a later '{' to it.
+				pendingEntityIdx = -1
+				pendingIsType = false
+				pendingTypeName = ""
 			}
 		}
 	}
