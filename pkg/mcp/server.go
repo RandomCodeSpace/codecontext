@@ -202,7 +202,7 @@ func (s *Server) dispatch(method string, params map[string]interface{}) (interfa
 	switch method {
 	case "initialize":
 		return map[string]interface{}{
-			"protocolVersion": "2024-11-05",
+			"protocolVersion": "2025-03-26",
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 			"serverInfo":      map[string]interface{}{"name": "codecontext", "version": s.version},
 		}, nil
@@ -493,23 +493,26 @@ func (s *Server) ListenHTTP(addr string) error {
 	return http.ListenAndServe(addr, mux)
 }
 
-// httpMCP handles POST /mcp — standard JSON-RPC 2.0 over HTTP.
+// httpMCP handles POST /mcp — Streamable HTTP (MCP 2025-03-26).
 func (s *Server) httpMCP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	s.logger.Info("http request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "use POST", http.StatusMethodNotAllowed)
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.writeHTTPError(w, nil, -32700, "parse error")
+		s.logger.Error("http parse error", "remote", r.RemoteAddr, "error", err.Error())
+		s.writeHTTPError(w, nil, codeParseError, "parse error: "+err.Error())
 		return
 	}
 
@@ -529,12 +532,11 @@ func (s *Server) httpMCP(w http.ResponseWriter, r *http.Request) {
 		s.writeHTTPError(w, id, code, err.Error())
 		return
 	}
-	// Notifications produce nil result — send 204 (no response body).
+	// Notifications produce nil result — send 202 (accepted, no body).
 	if result == nil {
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	s.writeHTTPResult(w, id, result)
 }
 
@@ -546,6 +548,7 @@ func (s *Server) httpTools(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writeHTTPResult(w http.ResponseWriter, id, result interface{}) {
+	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"jsonrpc": "2.0", "id": id, "result": result,
 	})
