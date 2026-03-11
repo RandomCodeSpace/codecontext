@@ -69,7 +69,9 @@ Examples:
   codecontext stats                          # show graph statistics
   codecontext web                            # open graph visualisation at http://localhost:8080
   codecontext ai query "what does main do"  # AI analysis
-  codecontext mcp                            # start MCP server
+  codecontext mcp                            # start MCP server (stdio)
+  codecontext mcp -http                      # start MCP server (HTTP on :8081)
+  codecontext mcp -http -addr :9000          # start MCP server (HTTP on :9000)
 `
 
 func main() {
@@ -109,7 +111,7 @@ func main() {
 	case "web":
 		handleWeb(graphDB, cmdArgs, *verbose)
 	case "mcp":
-		handleMCP(graphDB)
+		handleMCP(graphDB, cmdArgs)
 	default:
 		legacyAggregate(command, ext)
 		for _, arg := range cmdArgs {
@@ -471,7 +473,12 @@ func handleWeb(graphDB *string, args []string, verbose bool) {
 // mcp command
 // --------------------------------------------------------------------------
 
-func handleMCP(graphDB *string) {
+func handleMCP(graphDB *string, args []string) {
+	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
+	useHTTP := fs.Bool("http", false, "serve over HTTP instead of stdio")
+	addr := fs.String("addr", ":8081", "HTTP listen address (only with -http)")
+	_ = fs.Parse(args)
+
 	database, err := db.Open(*graphDB, false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
@@ -481,6 +488,17 @@ func handleMCP(graphDB *string) {
 
 	idx := indexer.New(database)
 	mcpServer := mcp.New(idx)
+
+	if *useHTTP {
+		fmt.Fprintf(os.Stderr, "🔌 MCP HTTP server listening on http://localhost%s\n", *addr)
+		fmt.Fprintf(os.Stderr, "   POST /mcp        JSON-RPC 2.0 endpoint\n")
+		fmt.Fprintf(os.Stderr, "   GET  /mcp/tools   list available tools\n")
+		if err := mcpServer.ListenHTTP(*addr); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ MCP HTTP server error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {

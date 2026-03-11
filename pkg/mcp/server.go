@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/RandomCodeSpace/codecontext/pkg/indexer"
 )
@@ -203,4 +204,101 @@ func (s *Server) handleGraphStats(args map[string]interface{}) (interface{}, err
 func SerializeToolResult(result interface{}) string {
 	data, _ := json.MarshalIndent(result, "", "  ")
 	return string(data)
+}
+
+// --------------------------------------------------------------------------
+// HTTP transport
+// --------------------------------------------------------------------------
+
+// ListenHTTP starts an HTTP MCP server on addr (e.g. ":8081").
+//
+// Endpoints:
+//
+//	POST /mcp          JSON-RPC 2.0 request → response
+//	GET  /mcp/tools    convenience: list tools as JSON (no JSON-RPC wrapper)
+func (s *Server) ListenHTTP(addr string) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp", s.httpMCP)
+	mux.HandleFunc("/mcp/tools", s.httpTools)
+	return http.ListenAndServe(addr, mux)
+}
+
+// httpMCP handles POST /mcp — standard JSON-RPC 2.0 over HTTP.
+func (s *Server) httpMCP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "use POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeHTTPError(w, nil, -32700, "parse error")
+		return
+	}
+
+	id := req["id"]
+	method, _ := req["method"].(string)
+	w.Header().Set("Content-Type", "application/json")
+
+	switch method {
+	case "initialize":
+		s.writeHTTPResult(w, id, map[string]interface{}{
+			"protocolVersion": "2024-11-05",
+			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
+			"serverInfo":      map[string]interface{}{"name": "codecontext", "version": "http"},
+		})
+
+	case "tools/list":
+		s.writeHTTPResult(w, id, map[string]interface{}{"tools": s.GetTools()})
+
+	case "tools/call":
+		params, _ := req["params"].(map[string]interface{})
+		toolName, _ := params["name"].(string)
+		arguments, _ := params["arguments"].(map[string]interface{})
+		if arguments == nil {
+			arguments = map[string]interface{}{}
+		}
+		result, err := s.CallTool(toolName, arguments)
+		if err != nil {
+			s.writeHTTPError(w, id, -32603, err.Error())
+			return
+		}
+		s.writeHTTPResult(w, id, map[string]interface{}{
+			"content": []map[string]interface{}{
+				{"type": "text", "text": SerializeToolResult(result)},
+			},
+		})
+
+	default:
+		s.writeHTTPError(w, id, -32601, "method not found")
+	}
+}
+
+// httpTools handles GET /mcp/tools — returns the tool list directly as JSON,
+// which is handy for browsing or health-checking without JSON-RPC boilerplate.
+func (s *Server) httpTools(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"tools": s.GetTools()})
+}
+
+func (s *Server) writeHTTPResult(w http.ResponseWriter, id, result interface{}) {
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"jsonrpc": "2.0", "id": id, "result": result,
+	})
+}
+
+func (s *Server) writeHTTPError(w http.ResponseWriter, id interface{}, code int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"jsonrpc": "2.0", "id": id,
+		"error": map[string]interface{}{"code": code, "message": message},
+	})
 }
