@@ -39,24 +39,46 @@ This project uses GitHub Actions for automated testing and validation.
 
 ### Languages Tested
 
-- ✅ Go (native stdlib AST parser)
-- ✅ Python (detected, empty results for now)
-- ✅ JavaScript (detected, empty results for now)
+- ✅ **Go** (native stdlib AST parser - full support)
+  - Functions, methods, types, interfaces, fields
+  - Receiver tracking and visibility
+
+- ✅ **Java** (regex-based parser - functions, classes, interfaces)
+  - Classes with constructors
+  - Methods with parameters
+  - Interfaces with method signatures
+  - Enums with values
+  - JavaDoc extraction
+
+- ✅ **Python** (detected, framework ready)
+  - Placeholders for functions and classes
+
+- ✅ **JavaScript/TypeScript** (detected, framework ready)
+  - Placeholders for functions and classes
 
 ### Test Scenarios
 
 1. **Single Language Projects**
    - codecontext repository (Go)
    - golang/example repository (Go)
+   - Java project with classes, interfaces, enums
 
 2. **Mixed Language Projects**
    - Go functions and methods
    - Python classes and functions
    - JavaScript classes and methods
 
-3. **Queries**
-   - Entity name search
-   - Graph statistics
+3. **Java Specific Tests**
+   - Classes with constructors and methods
+   - Interfaces with method signatures
+   - Enums with constants
+   - JavaDoc comments extraction
+   - Method visibility (public, private, protected)
+
+4. **Queries**
+   - Entity name search (functions, methods, classes)
+   - Graph statistics across multiple languages
+   - Language-specific entity detection
 
 ## Running Tests Locally
 

@@ -180,6 +180,150 @@ jobs:
           $GITHUB_WORKSPACE/codecontext/codecontext query entity Multiply
           echo ""
 
+      - name: Test CLI on Java project
+        run: |
+          cd /tmp
+          echo "=== Setting up Java test project ==="
+
+          mkdir -p java-project
+
+          # Create a Java Calculator class
+          cat > java-project/Calculator.java << 'EOF'
+          package com.example;
+
+          /**
+           * A simple calculator class demonstrating Java code parsing
+           */
+          public class Calculator {
+              private String name;
+
+              /**
+               * Constructor for Calculator
+               * @param name the name of the calculator
+               */
+              public Calculator(String name) {
+                  this.name = name;
+              }
+
+              /**
+               * Adds two numbers
+               * @param a first number
+               * @param b second number
+               * @return the sum
+               */
+              public int add(int a, int b) {
+                  return a + b;
+              }
+
+              /**
+               * Multiplies two numbers
+               * @param x first number
+               * @param y second number
+               * @return the product
+               */
+              public int multiply(int x, int y) {
+                  return x * y;
+              }
+
+              /**
+               * Divides two numbers
+               * @param dividend the number to divide
+               * @param divisor the number to divide by
+               * @return the quotient
+               */
+              public double divide(double dividend, double divisor) {
+                  if (divisor == 0) {
+                      throw new IllegalArgumentException("Divisor cannot be zero");
+                  }
+                  return dividend / divisor;
+              }
+
+              /**
+               * Gets the calculator name
+               * @return the name
+               */
+              public String getName() {
+                  return this.name;
+              }
+          }
+          EOF
+
+          # Create a Java interface
+          cat > java-project/Operation.java << 'EOF'
+          package com.example;
+
+          /**
+           * Interface for mathematical operations
+           */
+          public interface Operation {
+              /**
+               * Performs the operation
+               * @param a first operand
+               * @param b second operand
+               * @return the result
+               */
+              double execute(double a, double b);
+          }
+          EOF
+
+          # Create a Java enum
+          cat > java-project/MathOperation.java << 'EOF'
+          package com.example;
+
+          /**
+           * Enum for different math operations
+           */
+          public enum MathOperation {
+              ADD("+"),
+              SUBTRACT("-"),
+              MULTIPLY("*"),
+              DIVIDE("/");
+
+              private String symbol;
+
+              MathOperation(String symbol) {
+                  this.symbol = symbol;
+              }
+
+              public String getSymbol() {
+                  return symbol;
+              }
+          }
+          EOF
+
+          cd java-project
+          echo "✓ Java project created with 3 files"
+
+          # Index the Java project
+          echo ""
+          echo "=== Indexing Java project ==="
+          $GITHUB_WORKSPACE/codecontext/codecontext index .
+
+          if [ ! -f .codecontext.db ]; then
+              echo "❌ Database not created for Java project"
+              exit 1
+          fi
+          echo "✓ Java project indexed successfully"
+
+          # Get stats
+          echo ""
+          echo "=== Java Project Statistics ==="
+          $GITHUB_WORKSPACE/codecontext/codecontext stats
+          echo ""
+
+          # Query Java entities
+          echo "=== Query: Calculator class ==="
+          $GITHUB_WORKSPACE/codecontext/codecontext query entity Calculator
+          echo ""
+
+          echo "=== Query: add method ==="
+          $GITHUB_WORKSPACE/codecontext/codecontext query entity add
+          echo ""
+
+          echo "=== Query: Operation interface ==="
+          $GITHUB_WORKSPACE/codecontext/codecontext query entity Operation
+          echo ""
+
       - name: Test legacy file aggregation
         run: |
           cd codecontext
