@@ -500,7 +500,12 @@ func handleMCP(graphDB *string, args []string) {
 		return
 	}
 
+	fmt.Fprintln(os.Stderr, `{"level":"INFO","msg":"mcp stdio server ready","db":"`+*graphDB+`"}`)
+
+	const maxScannerBuf = 16 * 1024 * 1024 // 16 MB — handles large tool payloads
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, maxScannerBuf), maxScannerBuf)
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.TrimSpace(line) == "" {
@@ -534,6 +539,10 @@ func handleMCP(graphDB *string, args []string) {
 			continue
 		}
 		writeJSONRPCResult(id, result)
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, `{"level":"ERROR","msg":"stdio scanner error","error":"%s"}`+"\n", err.Error())
 	}
 }
 
