@@ -226,19 +226,20 @@ func (ap *AzureOpenAIProvider) GetModel() *ModelInfo {
 	return ap.model
 }
 
-// IsHealthy checks if the Azure OpenAI service is available
+// IsHealthy checks if the Azure OpenAI service is available by sending a
+// minimal chat completion request.  The legacy /completions endpoint is not
+// supported on modern Azure GPT-3.5/4/4o deployments, so we always use
+// /chat/completions here.
 func (ap *AzureOpenAIProvider) IsHealthy(ctx context.Context) (bool, error) {
-	// Azure OpenAI doesn't have a simple health check endpoint
-	// We'll verify by trying a simple completion request with a timeout
-	maxTokens := int64(1)
-	_, err := ap.Complete(ctx, "test", &CompletionOptions{
+	maxTokens := int64(5)
+	_, err := ap.Chat(ctx, []*Message{
+		{Role: "user", Content: "ping"},
+	}, &CompletionOptions{
 		MaxTokens: &maxTokens,
 	})
-
 	if err != nil {
-		return false, fmt.Errorf("azure openai not responding: %w", err)
+		return false, fmt.Errorf("azure openai health check failed: %w", err)
 	}
-
 	return true, nil
 }
 

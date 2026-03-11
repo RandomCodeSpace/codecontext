@@ -15,6 +15,7 @@ import (
 	"github.com/RandomCodeSpace/codecontext/pkg/indexer"
 	"github.com/RandomCodeSpace/codecontext/pkg/llm"
 	"github.com/RandomCodeSpace/codecontext/pkg/mcp"
+	"github.com/RandomCodeSpace/codecontext/pkg/web"
 )
 
 var version = "dev"
@@ -30,11 +31,13 @@ Commands:
   query                Query the code graph
   ai                   Analyze code with AI
   stats                Show graph statistics
-  mcp                  Start MCP server
+  web                  Start web UI to visualise the code graph
+  mcp                  Start MCP server (for Claude integration)
 
 Flags:
   -ext string          Comma-separated file extensions to include (e.g. .go,.ts)
   -graph string        Path to graph database (default: .codecontext.db)
+  -verbose             Enable verbose logging
   -version             Print version and exit
   -help                Print this help message
 
@@ -50,16 +53,19 @@ Examples:
   codecontext .                              # aggregate all files in current directory
   codecontext -ext .go,.md .                 # aggregate only .go and .md files
   codecontext index .                        # index current directory
+  codecontext index -verbose .              # index with detailed logging
   codecontext query entity myFunction        # query for entity
   codecontext stats                          # show graph statistics
+  codecontext web                            # open graph visualisation at http://localhost:8080
   codecontext ai query "what does main do"  # AI analysis
-  codecontext mcp                            # start MCP server (for Claude integration)
+  codecontext mcp                            # start MCP server
 `
 
 func main() {
 	ext := flag.String("ext", "", "comma-separated file extensions to include")
 	graphDB := flag.String("graph", ".codecontext.db", "path to graph database")
 	ver := flag.Bool("version", false, "print version")
+	verbose := flag.Bool("verbose", false, "enable verbose logging")
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	flag.Parse()
 
@@ -70,7 +76,6 @@ func main() {
 
 	args := flag.Args()
 
-	// If no command, run legacy behavior (aggregate files)
 	if len(args) == 0 {
 		legacyAggregate(".", ext)
 		return
@@ -81,17 +86,18 @@ func main() {
 
 	switch command {
 	case "index":
-		handleIndex(graphDB, cmdArgs)
+		handleIndex(graphDB, cmdArgs, *verbose)
 	case "query":
-		handleQuery(graphDB, cmdArgs)
+		handleQuery(graphDB, cmdArgs, *verbose)
 	case "ai":
-		handleAI(graphDB, cmdArgs)
+		handleAI(graphDB, cmdArgs, *verbose)
 	case "stats":
-		handleStats(graphDB)
+		handleStats(graphDB, *verbose)
+	case "web":
+		handleWeb(graphDB, cmdArgs, *verbose)
 	case "mcp":
 		handleMCP(graphDB)
 	default:
-		// Treat as paths to aggregate
 		legacyAggregate(command, ext)
 		for _, arg := range cmdArgs {
 			legacyAggregate(arg, ext)
@@ -99,7 +105,10 @@ func main() {
 	}
 }
 
-// legacyAggregate handles the original functionality
+// --------------------------------------------------------------------------
+// Legacy aggregate command
+// --------------------------------------------------------------------------
+
 func legacyAggregate(pathArg string, extFilter *string) {
 	var exts map[string]bool
 	if *extFilter != "" {
@@ -115,7 +124,7 @@ func legacyAggregate(pathArg string, extFilter *string) {
 
 	info, err := os.Stat(pathArg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -123,7 +132,7 @@ func legacyAggregate(pathArg string, extFilter *string) {
 	if info.IsDir() {
 		walked, err := walkDir(pathArg, exts)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "❌ error: %v\n", err)
 			os.Exit(1)
 		}
 		files = walked
@@ -132,132 +141,194 @@ func legacyAggregate(pathArg string, extFilter *string) {
 	}
 
 	if len(files) == 0 {
-		fmt.Fprintln(os.Stderr, "no files found")
+		fmt.Fprintln(os.Stderr, "⚠️  no files found")
 		os.Exit(1)
 	}
 
 	for _, f := range files {
 		if err := printFile(f); err != nil {
-			fmt.Fprintf(os.Stderr, "error reading %s: %v\n", f, err)
+			fmt.Fprintf(os.Stderr, "❌ error reading %s: %v\n", f, err)
 		}
 	}
 }
 
-func handleIndex(graphDB *string, args []string) {
+// --------------------------------------------------------------------------
+// index command
+// --------------------------------------------------------------------------
+
+func handleIndex(graphDB *string, args []string, verbose bool) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: codecontext index <path>\n")
+		fmt.Fprintln(os.Stderr, "usage: codecontext index <path>")
 		os.Exit(1)
 	}
-
 	dirPath := args[0]
 
-	// Open or create database
-	database, err := db.Open(*graphDB)
+	fmt.Printf("🔧 Opening database: %s\n", *graphDB)
+	database, err := db.Open(*graphDB, false)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error opening database: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
 		os.Exit(1)
 	}
 	defer database.Close()
 
-	// Create indexer and index directory
 	idx := indexer.New(database)
-	fmt.Printf("Indexing directory: %s\n", dirPath)
+	idx.SetVerbose(verbose)
 
+	fmt.Printf("📁 Indexing directory: %s\n", dirPath)
 	if err := idx.IndexDirectory(dirPath); err != nil {
-		fmt.Fprintf(os.Stderr, "error indexing directory: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ error indexing directory: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("✓ Indexing complete. Database: %s\n", *graphDB)
+	// Print final stats.
+	stats, _ := idx.GetStats()
+	fmt.Printf("✅ Indexing complete!\n")
+	fmt.Printf("   📄 Files:        %v\n", stats["files"])
+	fmt.Printf("   🧩 Entities:     %v\n", stats["entities"])
+	fmt.Printf("   🔗 Relations:    %v\n", stats["relations"])
+	fmt.Printf("   📦 Dependencies: %v\n", stats["dependencies"])
+	fmt.Printf("   💾 Database:     %s\n", *graphDB)
 }
 
-func handleQuery(graphDB *string, args []string) {
+// --------------------------------------------------------------------------
+// query command
+// --------------------------------------------------------------------------
+
+func handleQuery(graphDB *string, args []string, verbose bool) {
 	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: codecontext query <type> <query>\n")
-		fmt.Fprintf(os.Stderr, "types: entity, calls, deps\n")
+		fmt.Fprintln(os.Stderr, "usage: codecontext query <type> <query>")
+		fmt.Fprintln(os.Stderr, "types: entity, calls, deps")
 		os.Exit(1)
 	}
-
 	queryType := args[0]
 	query := args[1]
 
-	// Open database
-	database, err := db.Open(*graphDB)
+	fmt.Printf("🔧 Opening database: %s\n", *graphDB)
+	database, err := db.Open(*graphDB, false)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error opening database: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
 		os.Exit(1)
 	}
 	defer database.Close()
 
 	idx := indexer.New(database)
+	idx.SetVerbose(verbose)
 
 	switch queryType {
 	case "entity":
+		fmt.Printf("🔍 Searching for entity: %q\n", query)
 		entities, err := idx.QueryEntity(query)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error querying entity: %v\n", err)
+			fmt.Fprintf(os.Stderr, "❌ error querying entity: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Found %d entities:\n", len(entities))
+		fmt.Printf("📋 Found %d entities:\n", len(entities))
 		for _, e := range entities {
-			fmt.Printf("  - ID: %d, Name: %s, Type: %s, File: %d\n", e.ID, e.Name, e.Type, e.FileID)
+			fmt.Printf("  • [%s] %s  (ID=%d, file=%d, lines %d-%d)\n",
+				e.Type, e.Name, e.ID, e.FileID, e.StartLine, e.EndLine)
+			if e.Signature != "" {
+				fmt.Printf("    Signature: %s\n", e.Signature)
+			}
+			if e.Parent != "" {
+				fmt.Printf("    Parent:    %s\n", e.Parent)
+			}
 		}
 
 	case "calls":
-		// Parse entity ID from query
 		var entityID int64
 		fmt.Sscanf(query, "%d", &entityID)
 		if entityID == 0 {
-			fmt.Fprintf(os.Stderr, "invalid entity ID: %s\n", query)
+			fmt.Fprintf(os.Stderr, "❌ invalid entity ID: %s\n", query)
 			os.Exit(1)
 		}
+		fmt.Printf("🔗 Call graph for entity %d:\n", entityID)
 		graph, err := idx.QueryCallGraph(entityID)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error querying call graph: %v\n", err)
+			fmt.Fprintf(os.Stderr, "❌ error querying call graph: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Call graph: %v\n", graph)
+		printJSON(graph)
 
 	case "deps":
+		fmt.Printf("📦 Dependencies for: %s\n", query)
 		graph, err := idx.QueryDependencyGraph(query)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error querying dependencies: %v\n", err)
+			fmt.Fprintf(os.Stderr, "❌ error querying dependencies: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Dependencies: %v\n", graph)
+		printJSON(graph)
 
 	default:
-		fmt.Fprintf(os.Stderr, "unknown query type: %s\n", queryType)
+		fmt.Fprintf(os.Stderr, "❌ unknown query type: %s\n", queryType)
 		os.Exit(1)
 	}
 }
 
-func handleStats(graphDB *string) {
-	database, err := db.Open(*graphDB)
+// --------------------------------------------------------------------------
+// stats command
+// --------------------------------------------------------------------------
+
+func handleStats(graphDB *string, verbose bool) {
+	database, err := db.Open(*graphDB, false)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error opening database: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
 		os.Exit(1)
 	}
 	defer database.Close()
 
 	idx := indexer.New(database)
+	idx.SetVerbose(verbose)
 	stats, err := idx.GetStats()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error getting stats: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ error getting stats: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Println("Code Graph Statistics:")
-	fmt.Printf("  Files:       %v\n", stats["files"])
-	fmt.Printf("  Entities:    %v\n", stats["entities"])
-	fmt.Printf("  Dependencies:%v\n", stats["dependencies"])
-	fmt.Printf("  Relations:   %v\n", stats["relations"])
+	fmt.Println("📊 Code Graph Statistics:")
+	fmt.Printf("   📄 Files:        %v\n", stats["files"])
+	fmt.Printf("   🧩 Entities:     %v\n", stats["entities"])
+	fmt.Printf("   📦 Dependencies: %v\n", stats["dependencies"])
+	fmt.Printf("   🔗 Relations:    %v\n", stats["relations"])
 }
 
-func handleMCP(graphDB *string) {
-	database, err := db.Open(*graphDB)
+// --------------------------------------------------------------------------
+// web command
+// --------------------------------------------------------------------------
+
+func handleWeb(graphDB *string, args []string, verbose bool) {
+	port := "8080"
+	if len(args) > 0 {
+		port = args[0]
+	}
+
+	fmt.Printf("🔧 Opening database: %s\n", *graphDB)
+	database, err := db.Open(*graphDB, false)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error opening database: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	idx := indexer.New(database)
+	idx.SetVerbose(verbose)
+
+	srv := web.New(idx)
+	fmt.Printf("🌐 Starting graph UI at http://localhost:%s\n", port)
+	fmt.Println("   Press Ctrl+C to stop")
+	if err := srv.Listen(":" + port); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ web server error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// --------------------------------------------------------------------------
+// mcp command
+// --------------------------------------------------------------------------
+
+func handleMCP(graphDB *string) {
+	database, err := db.Open(*graphDB, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
 		os.Exit(1)
 	}
 	defer database.Close()
@@ -265,7 +336,6 @@ func handleMCP(graphDB *string) {
 	idx := indexer.New(database)
 	mcpServer := mcp.New(idx)
 
-	// MCP JSON-RPC 2.0 server over stdin/stdout
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -289,11 +359,8 @@ func handleMCP(graphDB *string) {
 				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 				"serverInfo":      map[string]interface{}{"name": "codecontext", "version": version},
 			})
-
 		case "tools/list":
-			tools := mcpServer.GetTools()
-			writeJSONRPCResult(id, map[string]interface{}{"tools": tools})
-
+			writeJSONRPCResult(id, map[string]interface{}{"tools": mcpServer.GetTools()})
 		case "tools/call":
 			params, _ := req["params"].(map[string]interface{})
 			toolName, _ := params["name"].(string)
@@ -311,7 +378,6 @@ func handleMCP(graphDB *string) {
 					{"type": "text", "text": mcp.SerializeToolResult(result)},
 				},
 			})
-
 		default:
 			writeJSONRPCError(id, -32601, "Method not found")
 		}
@@ -319,27 +385,231 @@ func handleMCP(graphDB *string) {
 }
 
 func writeJSONRPCResult(id interface{}, result interface{}) {
-	resp := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"result":  result,
-	}
+	resp := map[string]interface{}{"jsonrpc": "2.0", "id": id, "result": result}
 	data, _ := json.Marshal(resp)
 	fmt.Println(string(data))
 }
 
 func writeJSONRPCError(id interface{}, code int, message string) {
 	resp := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"error": map[string]interface{}{
-			"code":    code,
-			"message": message,
-		},
+		"jsonrpc": "2.0", "id": id,
+		"error": map[string]interface{}{"code": code, "message": message},
 	}
 	data, _ := json.Marshal(resp)
 	fmt.Println(string(data))
 }
+
+// --------------------------------------------------------------------------
+// ai command
+// --------------------------------------------------------------------------
+
+func handleAI(graphDB *string, args []string, verbose bool) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: codecontext ai <subcommand> [args]")
+		fmt.Fprintln(os.Stderr, "subcommands: query, analyze, docs, review, summarize, chat")
+		os.Exit(1)
+	}
+
+	subcommand := args[0]
+	subargs := args[1:]
+
+	fmt.Printf("🔧 Opening database: %s\n", *graphDB)
+	database, err := db.Open(*graphDB, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	fmt.Println("⚙️  Loading LLM configuration...")
+	cfg := llm.LoadConfig()
+	if verbose {
+		fmt.Printf("   Provider:    %s\n", cfg.Provider)
+		fmt.Printf("   Model:       %s\n", cfg.Model)
+		fmt.Printf("   Temperature: %.2f\n", cfg.Temperature)
+		fmt.Printf("   MaxTokens:   %d\n", cfg.MaxTokens)
+		if cfg.Provider == llm.ProviderAzure {
+			fmt.Printf("   Endpoint:    %s\n", cfg.AzureOpenAIEndpoint)
+			fmt.Printf("   API version: %s\n", cfg.AzureOpenAIVersion)
+		}
+	}
+
+	fmt.Printf("🔌 Creating %s provider...\n", cfg.Provider)
+	provider, err := llm.NewProvider(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ error creating LLM provider: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx := context.Background()
+	fmt.Printf("🏥 Checking provider health...\n")
+	healthy, healthErr := provider.IsHealthy(ctx)
+	if healthErr != nil || !healthy {
+		msg := "provider did not respond"
+		if healthErr != nil {
+			msg = healthErr.Error()
+		}
+		fmt.Fprintf(os.Stderr, "❌ LLM provider is not available: %s\n", msg)
+		fmt.Fprintln(os.Stderr, "   Verify your environment variables:")
+		switch cfg.Provider {
+		case llm.ProviderAzure:
+			fmt.Fprintln(os.Stderr, "   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION")
+		case llm.ProviderOpenAI:
+			fmt.Fprintln(os.Stderr, "   OPENAI_API_KEY, OPENAI_MODEL")
+		case llm.ProviderOllama:
+			fmt.Fprintln(os.Stderr, "   OLLAMA_BASE_URL (default http://localhost:11434), LLM_MODEL")
+		}
+		os.Exit(1)
+	}
+	fmt.Printf("✅ Provider healthy (%s / %s)\n", cfg.Provider, cfg.Model)
+
+	idx := indexer.New(database)
+	idx.SetVerbose(verbose)
+	chain := ai.NewChain(idx, provider)
+
+	switch subcommand {
+	case "query":
+		if len(subargs) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: codecontext ai query <question>")
+			os.Exit(1)
+		}
+		question := strings.Join(subargs, " ")
+		fmt.Printf("💬 Querying: %q\n\n", question)
+		response, err := chain.QueryNatural(ctx, question)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "analyze":
+		if len(subargs) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: codecontext ai analyze <entity_name>")
+			os.Exit(1)
+		}
+		fmt.Printf("🔬 Analysing entity: %s\n\n", subargs[0])
+		response, err := chain.AnalyzeEntity(ctx, subargs[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "docs":
+		if len(subargs) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: codecontext ai docs <entity_name>")
+			os.Exit(1)
+		}
+		fmt.Printf("📝 Generating docs for: %s\n\n", subargs[0])
+		response, err := chain.GenerateDocs(ctx, subargs[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "review":
+		if len(subargs) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: codecontext ai review <entity_name>")
+			os.Exit(1)
+		}
+		fmt.Printf("👀 Reviewing: %s\n\n", subargs[0])
+		response, err := chain.ReviewCode(ctx, subargs[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "summarize":
+		if len(subargs) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: codecontext ai summarize <file_path>")
+			os.Exit(1)
+		}
+		fmt.Printf("📄 Summarising: %s\n\n", subargs[0])
+		response, err := chain.Summarize(ctx, subargs[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "chat":
+		handleAIChat(ctx, chain)
+
+	default:
+		fmt.Fprintf(os.Stderr, "❌ unknown AI subcommand: %s\n", subcommand)
+		os.Exit(1)
+	}
+}
+
+func handleAIChat(ctx context.Context, chain *ai.Chain) {
+	fmt.Println("💬 AI Chat — interactive conversation about code")
+	fmt.Println("   Commands: analyze <entity>  docs <entity>  review <entity>  exit")
+	fmt.Println()
+
+	conversation := &ai.ConversationContext{
+		Messages: []*ai.Message{
+			{Role: "system", Content: "You are a helpful code analysis assistant. You have access to a codebase and can help analyze, explain, and improve code."},
+		},
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Print("> ")
+
+	for scanner.Scan() {
+		input := scanner.Text()
+		if input == "exit" {
+			fmt.Println("👋 Goodbye!")
+			return
+		}
+
+		parts := strings.Fields(input)
+		handled := false
+		if len(parts) > 0 {
+			switch parts[0] {
+			case "analyze", "docs", "review":
+				if len(parts) < 2 {
+					fmt.Printf("usage: %s <entity_name>\n", parts[0])
+					handled = true
+				} else {
+					var (
+						response string
+						err      error
+					)
+					switch parts[0] {
+					case "analyze":
+						response, err = chain.AnalyzeEntity(ctx, parts[1])
+					case "docs":
+						response, err = chain.GenerateDocs(ctx, parts[1])
+					case "review":
+						response, err = chain.ReviewCode(ctx, parts[1])
+					}
+					if err != nil {
+						fmt.Printf("❌ Error: %v\n", err)
+					} else {
+						fmt.Println(response)
+					}
+					handled = true
+				}
+			}
+		}
+
+		if !handled {
+			response, err := chain.Chat(ctx, conversation, input)
+			if err != nil {
+				fmt.Printf("❌ Error: %v\n", err)
+			} else {
+				fmt.Println(response)
+			}
+		}
+		fmt.Print("> ")
+	}
+}
+
+// --------------------------------------------------------------------------
+// Utilities
+// --------------------------------------------------------------------------
 
 func walkDir(dir string, exts map[string]bool) ([]string, error) {
 	var files []string
@@ -371,214 +641,7 @@ func printFile(path string) error {
 	return nil
 }
 
-func handleAI(graphDB *string, args []string) {
-	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: codecontext ai <subcommand> [args]\n")
-		fmt.Fprintf(os.Stderr, "subcommands: query, analyze, docs, review, summarize, chat\n")
-		os.Exit(1)
-	}
-
-	subcommand := args[0]
-	subargs := args[1:]
-
-	// Open database
-	database, err := db.Open(*graphDB)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error opening database: %v\n", err)
-		os.Exit(1)
-	}
-	defer database.Close()
-
-	// Load LLM configuration
-	cfg := llm.LoadConfig()
-
-	// Create LLM provider
-	provider, err := llm.NewProvider(cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error creating LLM provider: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Check if provider is healthy
-	ctx := context.Background()
-	healthy, err := provider.IsHealthy(ctx)
-	if err != nil || !healthy {
-		fmt.Fprintf(os.Stderr, "error: LLM provider is not available\n")
-		fmt.Fprintf(os.Stderr, "make sure your LLM provider is running and properly configured\n")
-		os.Exit(1)
-	}
-
-	// Create indexer and AI chain
-	idx := indexer.New(database)
-	chain := ai.NewChain(idx, provider)
-
-	switch subcommand {
-	case "query":
-		if len(subargs) == 0 {
-			fmt.Fprintf(os.Stderr, "usage: codecontext ai query <question>\n")
-			os.Exit(1)
-		}
-		question := strings.Join(subargs, " ")
-		response, err := chain.QueryNatural(ctx, question)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println(response)
-
-	case "analyze":
-		if len(subargs) == 0 {
-			fmt.Fprintf(os.Stderr, "usage: codecontext ai analyze <entity_name>\n")
-			os.Exit(1)
-		}
-		entityName := subargs[0]
-		response, err := chain.AnalyzeEntity(ctx, entityName)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println(response)
-
-	case "docs":
-		if len(subargs) == 0 {
-			fmt.Fprintf(os.Stderr, "usage: codecontext ai docs <entity_name>\n")
-			os.Exit(1)
-		}
-		entityName := subargs[0]
-		response, err := chain.GenerateDocs(ctx, entityName)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println(response)
-
-	case "review":
-		if len(subargs) == 0 {
-			fmt.Fprintf(os.Stderr, "usage: codecontext ai review <entity_name>\n")
-			os.Exit(1)
-		}
-		entityName := subargs[0]
-		response, err := chain.ReviewCode(ctx, entityName)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println(response)
-
-	case "summarize":
-		if len(subargs) == 0 {
-			fmt.Fprintf(os.Stderr, "usage: codecontext ai summarize <file_path>\n")
-			os.Exit(1)
-		}
-		filePath := subargs[0]
-		response, err := chain.Summarize(ctx, filePath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println(response)
-
-	case "chat":
-		handleAIChat(ctx, chain)
-
-	default:
-		fmt.Fprintf(os.Stderr, "unknown AI subcommand: %s\n", subcommand)
-		os.Exit(1)
-	}
-}
-
-func handleAIChat(ctx context.Context, chain *ai.Chain) {
-	fmt.Println("AI Chat - Interactive conversation about code")
-	fmt.Println("Commands:")
-	fmt.Println("  analyze <entity>  - Analyze a specific entity")
-	fmt.Println("  docs <entity>     - Generate docs for entity")
-	fmt.Println("  review <entity>   - Review code")
-	fmt.Println("  exit              - Exit chat")
-	fmt.Println()
-
-	conversation := &ai.ConversationContext{
-		Messages: []*ai.Message{
-			{
-				Role: "system",
-				Content: "You are a helpful code analysis assistant. You have access to a codebase and can help analyze, explain, and improve code.",
-			},
-		},
-	}
-
-	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Print("> ")
-
-	for scanner.Scan() {
-		input := scanner.Text()
-
-		if input == "exit" {
-			fmt.Println("Goodbye!")
-			return
-		}
-
-		// Handle special commands
-		parts := strings.Fields(input)
-		if len(parts) > 0 {
-			switch parts[0] {
-			case "analyze":
-				if len(parts) < 2 {
-					fmt.Println("usage: analyze <entity_name>")
-					fmt.Print("> ")
-					continue
-				}
-				response, err := chain.AnalyzeEntity(ctx, parts[1])
-				if err != nil {
-					fmt.Printf("Error: %v\n", err)
-				} else {
-					fmt.Println(response)
-				}
-				fmt.Print("> ")
-				continue
-
-			case "docs":
-				if len(parts) < 2 {
-					fmt.Println("usage: docs <entity_name>")
-					fmt.Print("> ")
-					continue
-				}
-				response, err := chain.GenerateDocs(ctx, parts[1])
-				if err != nil {
-					fmt.Printf("Error: %v\n", err)
-				} else {
-					fmt.Println(response)
-				}
-				fmt.Print("> ")
-				continue
-
-			case "review":
-				if len(parts) < 2 {
-					fmt.Println("usage: review <entity_name>")
-					fmt.Print("> ")
-					continue
-				}
-				response, err := chain.ReviewCode(ctx, parts[1])
-				if err != nil {
-					fmt.Printf("Error: %v\n", err)
-				} else {
-					fmt.Println(response)
-				}
-				fmt.Print("> ")
-				continue
-			}
-		}
-
-		// Regular chat message
-		response, err := chain.Chat(ctx, conversation, input)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		} else {
-			fmt.Println(response)
-		}
-
-		fmt.Print("> ")
-	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "error reading input: %v\n", err)
-	}
+func printJSON(v interface{}) {
+	data, _ := json.MarshalIndent(v, "", "  ")
+	fmt.Println(string(data))
 }
