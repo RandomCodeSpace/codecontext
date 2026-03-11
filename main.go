@@ -30,6 +30,7 @@ Commands:
   index                Index a directory to build code graph
   query                Query the code graph
   ai                   Analyze code with AI
+  docs                 Generate documentation for the whole project
   stats                Show graph statistics
   web                  Start web UI to visualise the code graph
   mcp                  Start MCP server (for Claude integration)
@@ -40,6 +41,12 @@ Flags:
   -verbose             Enable verbose logging
   -version             Print version and exit
   -help                Print this help message
+
+Docs Flags (codecontext docs):
+  -ai                  Use AI to write entity descriptions
+  -prompt string       Custom instruction for AI output style (only with -ai)
+                       e.g. "Use JSDoc format" or "One sentence per entity"
+  -output string       Write documentation to this file (default: stdout)
 
 AI Subcommands:
   codecontext ai query <query>           Ask a natural language question about the code
@@ -55,6 +62,10 @@ Examples:
   codecontext index .                        # index current directory
   codecontext index -verbose .              # index with detailed logging
   codecontext query entity myFunction        # query for entity
+  codecontext docs                           # standard Markdown docs to stdout
+  codecontext docs -output docs.md           # write standard docs to file
+  codecontext docs -ai                       # AI-generated docs (default style)
+  codecontext docs -ai -prompt "Use JSDoc"   # AI docs with custom style
   codecontext stats                          # show graph statistics
   codecontext web                            # open graph visualisation at http://localhost:8080
   codecontext ai query "what does main do"  # AI analysis
@@ -91,6 +102,8 @@ func main() {
 		handleQuery(graphDB, cmdArgs, *verbose)
 	case "ai":
 		handleAI(graphDB, cmdArgs, *verbose)
+	case "docs":
+		handleDocs(graphDB, cmdArgs, *verbose)
 	case "stats":
 		handleStats(graphDB, *verbose)
 	case "web":
@@ -262,6 +275,139 @@ func handleQuery(graphDB *string, args []string, verbose bool) {
 		fmt.Fprintf(os.Stderr, "❌ unknown query type: %s\n", queryType)
 		os.Exit(1)
 	}
+}
+
+// --------------------------------------------------------------------------
+// docs command
+// --------------------------------------------------------------------------
+
+func handleDocs(graphDB *string, args []string, verbose bool) {
+	fs := flag.NewFlagSet("docs", flag.ExitOnError)
+	useAI := fs.Bool("ai", false, "use AI to write entity descriptions")
+	prompt := fs.String("prompt", "", "custom instruction for AI output style (use with -ai)")
+	output := fs.String("output", "", "write documentation to this file (default: stdout)")
+	_ = fs.Parse(args)
+
+	database, err := db.Open(*graphDB, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	idx := indexer.New(database)
+	idx.SetVerbose(verbose)
+
+	var content string
+
+	if *useAI {
+		fmt.Fprintln(os.Stderr, "⚙️  Loading LLM configuration...")
+		cfg := llm.LoadConfig()
+		provider, err := llm.NewProvider(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error creating LLM provider: %v\n", err)
+			os.Exit(1)
+		}
+
+		ctx := context.Background()
+		healthy, healthErr := provider.IsHealthy(ctx)
+		if healthErr != nil || !healthy {
+			msg := "provider did not respond"
+			if healthErr != nil {
+				msg = healthErr.Error()
+			}
+			fmt.Fprintf(os.Stderr, "❌ LLM provider not available: %s\n", msg)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "✅ Provider ready (%s / %s)\n", cfg.Provider, cfg.Model)
+
+		chain := ai.NewChain(idx, provider)
+		progress := func(path string) {
+			fmt.Fprintf(os.Stderr, "  📝 %s\n", path)
+		}
+		content, err = chain.GenerateProjectDocs(ctx, *prompt, progress)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error generating docs: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		content, err = standardDocs(idx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error generating docs: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if *output != "" {
+		if err := os.WriteFile(*output, []byte(content), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ error writing file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "✅ Documentation written to %s\n", *output)
+	} else {
+		fmt.Print(content)
+	}
+}
+
+// standardDocs generates plain Markdown documentation from the indexed DB
+// without any AI calls.  Entities are grouped by file; each entity gets a
+// sub-section with its type, signature, visibility, and line range.
+func standardDocs(idx *indexer.Indexer) (string, error) {
+	files, err := idx.GetAllFiles()
+	if err != nil {
+		return "", fmt.Errorf("failed to get files: %w", err)
+	}
+	entities, err := idx.GetAllEntities()
+	if err != nil {
+		return "", fmt.Errorf("failed to get entities: %w", err)
+	}
+	stats, _ := idx.GetStats()
+
+	byFile := make(map[int64][]*db.Entity)
+	for _, e := range entities {
+		byFile[e.FileID] = append(byFile[e.FileID], e)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Project Documentation\n\n")
+	sb.WriteString(fmt.Sprintf(
+		"_Generated from indexed database — %v files, %v entities_\n\n---\n\n",
+		stats["files"], stats["entities"],
+	))
+
+	for _, f := range files {
+		ents := byFile[f.ID]
+		if len(ents) == 0 {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("## `%s` · %s\n\n", f.Path, f.Language))
+
+		for _, e := range ents {
+			// Heading: qualified name when entity has a parent.
+			heading := fmt.Sprintf("`%s`", e.Name)
+			if e.Parent != "" {
+				heading = fmt.Sprintf("`%s.%s`", e.Parent, e.Name)
+			}
+			sb.WriteString(fmt.Sprintf("### %s · %s · lines %d–%d\n\n", heading, e.Type, e.StartLine, e.EndLine))
+
+			if e.Signature != "" {
+				sb.WriteString(fmt.Sprintf("```\n%s\n```\n\n", e.Signature))
+			}
+			if e.Visibility != "" {
+				sb.WriteString(fmt.Sprintf("- **Visibility:** %s\n", e.Visibility))
+			}
+			if e.Kind != "" && e.Kind != e.Type {
+				sb.WriteString(fmt.Sprintf("- **Kind:** %s\n", e.Kind))
+			}
+			if e.Documentation != "" {
+				sb.WriteString("\n" + e.Documentation + "\n")
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("---\n\n")
+	}
+
+	return sb.String(), nil
 }
 
 // --------------------------------------------------------------------------

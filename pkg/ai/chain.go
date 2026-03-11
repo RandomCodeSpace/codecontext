@@ -3,7 +3,9 @@ package ai
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/RandomCodeSpace/codecontext/pkg/db"
 	"github.com/RandomCodeSpace/codecontext/pkg/indexer"
 	"github.com/RandomCodeSpace/codecontext/pkg/llm"
 )
@@ -297,6 +299,78 @@ func (c *Chain) Summarize(ctx context.Context, filePath string) (string, error) 
 	}
 
 	return response, nil
+}
+
+// GenerateProjectDocs generates AI-assisted documentation for every file in
+// the project.  All entities of a file are batched into a single prompt so
+// the number of API calls equals the number of indexed files.
+//
+// promptInstruction shapes the documentation style and is used as the system
+// message.  When empty a default technical-writing instruction is used.
+//
+// progressFn (optional) is called with each file path just before its API
+// call so the caller can print progress.
+func (c *Chain) GenerateProjectDocs(ctx context.Context, promptInstruction string, progressFn func(string)) (string, error) {
+	files, err := c.indexer.GetAllFiles()
+	if err != nil {
+		return "", fmt.Errorf("failed to get files: %w", err)
+	}
+	entities, err := c.indexer.GetAllEntities()
+	if err != nil {
+		return "", fmt.Errorf("failed to get entities: %w", err)
+	}
+
+	byFile := make(map[int64][]*db.Entity)
+	for _, e := range entities {
+		byFile[e.FileID] = append(byFile[e.FileID], e)
+	}
+
+	if promptInstruction == "" {
+		promptInstruction = "You are a technical documentation writer. " +
+			"For each code entity listed, write a clear and concise documentation entry. " +
+			"Include: purpose, parameters/return values where applicable, and any notable behaviour. " +
+			"Use Markdown formatting."
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Project Documentation (AI-generated)\n\n")
+
+	for _, f := range files {
+		ents := byFile[f.ID]
+		if len(ents) == 0 {
+			continue
+		}
+		if progressFn != nil {
+			progressFn(f.Path)
+		}
+
+		var body strings.Builder
+		body.WriteString(fmt.Sprintf("File: %s  Language: %s\n\nEntities:\n", f.Path, f.Language))
+		for _, e := range ents {
+			entry := fmt.Sprintf("  [%s] %s", e.Type, e.Name)
+			if e.Signature != "" {
+				entry += "  signature: " + e.Signature
+			}
+			if e.Parent != "" {
+				entry += "  parent: " + e.Parent
+			}
+			entry += fmt.Sprintf("  lines %d-%d", e.StartLine, e.EndLine)
+			body.WriteString(entry + "\n")
+		}
+
+		messages := []*llm.Message{
+			{Role: "system", Content: promptInstruction},
+			{Role: "user", Content: body.String()},
+		}
+		response, err := c.provider.Chat(ctx, messages, nil)
+		if err != nil {
+			sb.WriteString(fmt.Sprintf("## `%s`\n\n_Error generating docs: %v_\n\n---\n\n", f.Path, err))
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("## `%s`\n\n%s\n\n---\n\n", f.Path, response))
+	}
+
+	return sb.String(), nil
 }
 
 // Chat enables multi-turn conversation about code
