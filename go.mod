@@ -3,6 +3,8 @@ module github.com/RandomCodeSpace/codecontext
 go 1.22
 
 require (
+	github.com/joho/godotenv v1.5.1
+	github.com/sashabaranov/go-openai v1.20.2
 	gorm.io/driver/sqlite v1.5.5
 	gorm.io/gorm v1.25.7
 )

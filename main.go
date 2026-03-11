@@ -1,20 +1,24 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/RandomCodeSpace/codecontext/pkg/ai"
 	"github.com/RandomCodeSpace/codecontext/pkg/db"
 	"github.com/RandomCodeSpace/codecontext/pkg/indexer"
+	"github.com/RandomCodeSpace/codecontext/pkg/llm"
 	"github.com/RandomCodeSpace/codecontext/pkg/mcp"
 )
 
 var version = "dev"
 
-const usage = `codecontext - aggregate source files and build code graphs
+const usage = `codecontext - aggregate source files and build code graphs with AI analysis
 
 Usage:
   codecontext [flags] [command] [args...]
@@ -23,8 +27,9 @@ Commands:
   (no command)         Aggregate source files into a single context block
   index                Index a directory to build code graph
   query                Query the code graph
-  mcp                  Start MCP server
+  ai                   Analyze code with AI
   stats                Show graph statistics
+  mcp                  Start MCP server
 
 Flags:
   -ext string          Comma-separated file extensions to include (e.g. .go,.ts)
@@ -32,12 +37,21 @@ Flags:
   -version             Print version and exit
   -help                Print this help message
 
+AI Subcommands:
+  codecontext ai query <query>           Ask a natural language question about the code
+  codecontext ai analyze <entity>        Detailed analysis of an entity
+  codecontext ai docs <entity>           Generate documentation for an entity
+  codecontext ai review <entity>         Code review suggestions for an entity
+  codecontext ai summarize <file>        Summary of a file's purpose
+  codecontext ai chat                    Multi-turn conversation about code
+
 Examples:
   codecontext .                              # aggregate all files in current directory
   codecontext -ext .go,.md .                 # aggregate only .go and .md files
   codecontext index .                        # index current directory
   codecontext query entity myFunction        # query for entity
   codecontext stats                          # show graph statistics
+  codecontext ai query "what does main do"  # AI analysis
   codecontext mcp                            # start MCP server (for Claude integration)
 `
 
@@ -69,6 +83,8 @@ func main() {
 		handleIndex(graphDB, cmdArgs)
 	case "query":
 		handleQuery(graphDB, cmdArgs)
+	case "ai":
+		handleAI(graphDB, cmdArgs)
 	case "stats":
 		handleStats(graphDB)
 	case "mcp":
@@ -289,4 +305,216 @@ func printFile(path string) error {
 	}
 	fmt.Printf("=== %s ===\n%s\n", path, string(data))
 	return nil
+}
+
+func handleAI(graphDB *string, args []string) {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "usage: codecontext ai <subcommand> [args]\n")
+		fmt.Fprintf(os.Stderr, "subcommands: query, analyze, docs, review, summarize, chat\n")
+		os.Exit(1)
+	}
+
+	subcommand := args[0]
+	subargs := args[1:]
+
+	// Open database
+	database, err := db.Open(*graphDB)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	// Load LLM configuration
+	cfg := llm.LoadConfig()
+
+	// Create LLM provider
+	provider, err := llm.NewProvider(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating LLM provider: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Check if provider is healthy
+	ctx := context.Background()
+	healthy, err := provider.IsHealthy(ctx)
+	if err != nil || !healthy {
+		fmt.Fprintf(os.Stderr, "error: LLM provider is not available\n")
+		fmt.Fprintf(os.Stderr, "make sure your LLM provider is running and properly configured\n")
+		os.Exit(1)
+	}
+
+	// Create indexer and AI chain
+	idx := indexer.New(database)
+	chain := ai.NewChain(idx, provider)
+
+	switch subcommand {
+	case "query":
+		if len(subargs) == 0 {
+			fmt.Fprintf(os.Stderr, "usage: codecontext ai query <question>\n")
+			os.Exit(1)
+		}
+		question := strings.Join(subargs, " ")
+		response, err := chain.QueryNatural(ctx, question)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "analyze":
+		if len(subargs) == 0 {
+			fmt.Fprintf(os.Stderr, "usage: codecontext ai analyze <entity_name>\n")
+			os.Exit(1)
+		}
+		entityName := subargs[0]
+		response, err := chain.AnalyzeEntity(ctx, entityName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "docs":
+		if len(subargs) == 0 {
+			fmt.Fprintf(os.Stderr, "usage: codecontext ai docs <entity_name>\n")
+			os.Exit(1)
+		}
+		entityName := subargs[0]
+		response, err := chain.GenerateDocs(ctx, entityName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "review":
+		if len(subargs) == 0 {
+			fmt.Fprintf(os.Stderr, "usage: codecontext ai review <entity_name>\n")
+			os.Exit(1)
+		}
+		entityName := subargs[0]
+		response, err := chain.ReviewCode(ctx, entityName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "summarize":
+		if len(subargs) == 0 {
+			fmt.Fprintf(os.Stderr, "usage: codecontext ai summarize <file_path>\n")
+			os.Exit(1)
+		}
+		filePath := subargs[0]
+		response, err := chain.Summarize(ctx, filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(response)
+
+	case "chat":
+		handleAIChat(ctx, chain)
+
+	default:
+		fmt.Fprintf(os.Stderr, "unknown AI subcommand: %s\n", subcommand)
+		os.Exit(1)
+	}
+}
+
+func handleAIChat(ctx context.Context, chain *ai.Chain) {
+	fmt.Println("AI Chat - Interactive conversation about code")
+	fmt.Println("Commands:")
+	fmt.Println("  analyze <entity>  - Analyze a specific entity")
+	fmt.Println("  docs <entity>     - Generate docs for entity")
+	fmt.Println("  review <entity>   - Review code")
+	fmt.Println("  exit              - Exit chat")
+	fmt.Println()
+
+	conversation := &ai.ConversationContext{
+		Messages: []*ai.Message{
+			{
+				Role: "system",
+				Content: "You are a helpful code analysis assistant. You have access to a codebase and can help analyze, explain, and improve code.",
+			},
+		},
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Print("> ")
+
+	for scanner.Scan() {
+		input := scanner.Text()
+
+		if input == "exit" {
+			fmt.Println("Goodbye!")
+			return
+		}
+
+		// Handle special commands
+		parts := strings.Fields(input)
+		if len(parts) > 0 {
+			switch parts[0] {
+			case "analyze":
+				if len(parts) < 2 {
+					fmt.Println("usage: analyze <entity_name>")
+					fmt.Print("> ")
+					continue
+				}
+				response, err := chain.AnalyzeEntity(ctx, parts[1])
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				} else {
+					fmt.Println(response)
+				}
+				fmt.Print("> ")
+				continue
+
+			case "docs":
+				if len(parts) < 2 {
+					fmt.Println("usage: docs <entity_name>")
+					fmt.Print("> ")
+					continue
+				}
+				response, err := chain.GenerateDocs(ctx, parts[1])
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				} else {
+					fmt.Println(response)
+				}
+				fmt.Print("> ")
+				continue
+
+			case "review":
+				if len(parts) < 2 {
+					fmt.Println("usage: review <entity_name>")
+					fmt.Print("> ")
+					continue
+				}
+				response, err := chain.ReviewCode(ctx, parts[1])
+				if err != nil {
+					fmt.Printf("Error: %v\n", err)
+				} else {
+					fmt.Println(response)
+				}
+				fmt.Print("> ")
+				continue
+			}
+		}
+
+		// Regular chat message
+		response, err := chain.Chat(ctx, conversation, input)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+		} else {
+			fmt.Println(response)
+		}
+
+		fmt.Print("> ")
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "error reading input: %v\n", err)
+	}
 }
