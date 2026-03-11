@@ -493,10 +493,16 @@ func (s *Server) ListenHTTP(addr string) error {
 	return http.ListenAndServe(addr, mux)
 }
 
+// setCORS writes the common CORS headers shared by all MCP HTTP endpoints.
+func setCORS(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, Mcp-Session-Id")
+}
+
 // httpMCP handles POST /mcp — Streamable HTTP (MCP 2025-03-26).
 func (s *Server) httpMCP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	setCORS(w)
 
 	s.logger.Info("http request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr)
 
@@ -506,6 +512,13 @@ func (s *Server) httpMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate Content-Type per MCP Streamable HTTP spec.
+	ct := r.Header.Get("Content-Type")
+	if ct != "" && !strings.HasPrefix(ct, "application/json") {
+		s.writeHTTPError(w, nil, codeParseError, "Content-Type must be application/json")
 		return
 	}
 
@@ -542,24 +555,47 @@ func (s *Server) httpMCP(w http.ResponseWriter, r *http.Request) {
 
 // httpTools handles GET /mcp/tools — plain JSON tool listing.
 func (s *Server) httpTools(w http.ResponseWriter, r *http.Request) {
+	setCORS(w)
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{"tools": s.GetTools()})
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{"tools": s.GetTools()}); err != nil {
+		s.logger.Error("failed to encode tools response", "error", err.Error())
+	}
 }
 
 func (s *Server) writeHTTPResult(w http.ResponseWriter, id, result interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"jsonrpc": "2.0", "id": id, "result": result,
-	})
+	}); err != nil {
+		s.logger.Error("failed to encode result response", "error", err.Error())
+	}
 }
 
 func (s *Server) writeHTTPError(w http.ResponseWriter, id interface{}, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+
+	// Map JSON-RPC error codes to appropriate HTTP status codes.
+	httpStatus := http.StatusInternalServerError
+	switch code {
+	case codeParseError:
+		httpStatus = http.StatusBadRequest
+	case codeMethodNotFound:
+		httpStatus = http.StatusNotFound
+	}
+	w.WriteHeader(httpStatus)
+
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"jsonrpc": "2.0", "id": id,
 		"error": map[string]interface{}{"code": code, "message": message},
-	})
+	}); err != nil {
+		s.logger.Error("failed to encode error response", "error", err.Error())
+	}
 }
 
 // --------------------------------------------------------------------------
