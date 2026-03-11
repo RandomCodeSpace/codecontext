@@ -92,6 +92,18 @@ func (db *Database) GetFileByPath(path string) (*File, error) {
 	return &file, nil
 }
 
+func (db *Database) GetFileByID(id int64) (*File, error) {
+	var file File
+	result := db.conn.First(&file, id)
+	if result.Error == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("failed to get file: %w", result.Error)
+	}
+	return &file, nil
+}
+
 func (db *Database) GetFiles() ([]*File, error) {
 	var files []*File
 	if err := db.conn.Find(&files).Error; err != nil {

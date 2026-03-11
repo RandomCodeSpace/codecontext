@@ -365,3 +365,11 @@ func (idx *Indexer) GetAllFiles() ([]*db.File, error)              { return idx.
 func (idx *Indexer) GetAllEntities() ([]*db.Entity, error)         { return idx.db.GetAllEntities() }
 func (idx *Indexer) GetAllRelations() ([]*db.EntityRelation, error) { return idx.db.GetAllRelations() }
 func (idx *Indexer) GetAllDependencies() ([]*db.Dependency, error)  { return idx.db.GetAllDependencies() }
+func (idx *Indexer) GetFileByID(id int64) (*db.File, error)        { return idx.db.GetFileByID(id) }
+func (idx *Indexer) GetEntitiesByFile(fileID int64) ([]*db.Entity, error) {
+	return idx.db.GetEntitiesByFile(fileID)
+}
+func (idx *Indexer) GetEntityRelations(entityID int64, relType string) ([]*db.EntityRelation, error) {
+	return idx.db.GetEntityRelations(entityID, relType)
+}
+func (idx *Indexer) GetEntityByID(id int64) (*db.Entity, error) { return idx.db.GetEntityByID(id) }
