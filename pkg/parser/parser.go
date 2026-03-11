@@ -5,6 +5,9 @@ import (
 	"strings"
 
 	goparser "github.com/RandomCodeSpace/codecontext/pkg/parser/go"
+	jsparser "github.com/RandomCodeSpace/codecontext/pkg/parser/javascript"
+	javaparser "github.com/RandomCodeSpace/codecontext/pkg/parser/java"
+	pyparser "github.com/RandomCodeSpace/codecontext/pkg/parser/python"
 )
 
 // Parse routes to the appropriate language parser
@@ -14,23 +17,36 @@ func Parse(filePath string, content string) (*ParseResult, error) {
 
 	switch lang {
 	case Go:
-		// Use the Go AST parser
 		parser := &goparser.GoParser{}
 		result, err := parser.Parse(filePath, content)
 		if err != nil {
 			return nil, err
 		}
-		// Convert from go parser types to main types
-		return convertParseResult(result), nil
+		return convertGoParseResult(result), nil
 
-	case Python, JavaScript, TypeScript, Java:
-		// Fallback to empty for now - proper parsers coming soon
-		return &ParseResult{
-			FilePath:     filePath,
-			Language:     lang,
-			Entities:     []*Entity{},
-			Dependencies: []*Dependency{},
-		}, nil
+	case Python:
+		parser := &pyparser.PythonParser{}
+		result, err := parser.Parse(filePath, content)
+		if err != nil {
+			return nil, err
+		}
+		return convertPyParseResult(filePath, result), nil
+
+	case JavaScript, TypeScript:
+		parser := &jsparser.JSParser{}
+		result, err := parser.Parse(filePath, content)
+		if err != nil {
+			return nil, err
+		}
+		return convertJSParseResult(filePath, lang, result), nil
+
+	case Java:
+		parser := &javaparser.JavaParser{}
+		result, err := parser.Parse(filePath, content)
+		if err != nil {
+			return nil, err
+		}
+		return convertJavaParseResult(filePath, result), nil
 
 	default:
 		return &ParseResult{
@@ -42,8 +58,8 @@ func Parse(filePath string, content string) (*ParseResult, error) {
 	}
 }
 
-// convertParseResult converts from go parser result to main parser result
-func convertParseResult(result *goparser.ParseResult) *ParseResult {
+// convertGoParseResult converts from go parser result to main parser result
+func convertGoParseResult(result *goparser.ParseResult) *ParseResult {
 	mainResult := &ParseResult{
 		FilePath:     result.FilePath,
 		Language:     Go,
@@ -81,6 +97,75 @@ func convertParseResult(result *goparser.ParseResult) *ParseResult {
 	}
 
 	return mainResult
+}
+
+// convertPyParseResult converts a Python sub-parser result to the main ParseResult.
+func convertPyParseResult(filePath string, result *pyparser.ParseResult) *ParseResult {
+	main := &ParseResult{
+		FilePath:     filePath,
+		Language:     Python,
+		Entities:     make([]*Entity, len(result.Entities)),
+		Dependencies: make([]*Dependency, len(result.Dependencies)),
+	}
+	for i, e := range result.Entities {
+		main.Entities[i] = &Entity{
+			Name: e.Name, Type: e.Type, Kind: e.Kind,
+			Signature: e.Signature, StartLine: e.StartLine, EndLine: e.EndLine,
+			Docs: e.Docs, Parent: e.Parent, Language: Python,
+		}
+	}
+	for i, d := range result.Dependencies {
+		main.Dependencies[i] = &Dependency{
+			Path: d.Path, Type: d.Type, LineNumber: d.LineNumber, IsLocal: d.IsLocal,
+		}
+	}
+	return main
+}
+
+// convertJSParseResult converts a JavaScript/TypeScript sub-parser result to the main ParseResult.
+func convertJSParseResult(filePath string, lang Language, result *jsparser.ParseResult) *ParseResult {
+	main := &ParseResult{
+		FilePath:     filePath,
+		Language:     lang,
+		Entities:     make([]*Entity, len(result.Entities)),
+		Dependencies: make([]*Dependency, len(result.Dependencies)),
+	}
+	for i, e := range result.Entities {
+		main.Entities[i] = &Entity{
+			Name: e.Name, Type: e.Type, Kind: e.Kind,
+			Signature: e.Signature, StartLine: e.StartLine, EndLine: e.EndLine,
+			Docs: e.Docs, Parent: e.Parent, Language: lang,
+		}
+	}
+	for i, d := range result.Dependencies {
+		main.Dependencies[i] = &Dependency{
+			Path: d.Path, Type: d.Type, LineNumber: d.LineNumber, IsLocal: d.IsLocal,
+		}
+	}
+	return main
+}
+
+// convertJavaParseResult converts a Java sub-parser result to the main ParseResult.
+func convertJavaParseResult(filePath string, result *javaparser.ParseResult) *ParseResult {
+	main := &ParseResult{
+		FilePath:     filePath,
+		Language:     Java,
+		Entities:     make([]*Entity, len(result.Entities)),
+		Dependencies: make([]*Dependency, len(result.Dependencies)),
+	}
+	for i, e := range result.Entities {
+		main.Entities[i] = &Entity{
+			Name: e.Name, Type: e.Type, Kind: e.Kind,
+			Signature: e.Signature, StartLine: e.StartLine, EndLine: e.EndLine,
+			Docs: e.Docs, Parent: e.Parent, Language: Java,
+		}
+	}
+	for i, d := range result.Dependencies {
+		main.Dependencies[i] = &Dependency{
+			Path: d.Path, Type: d.Type, LineNumber: d.LineNumber, IsLocal: d.IsLocal,
+		}
+	}
+	return main
 }
 
 func detectLanguage(ext string) Language {

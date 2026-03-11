@@ -39,9 +39,9 @@ Current graph contains:
 
 When answering questions about code, provide specific references to entities in the codebase.
 Format references as [EntityName] when mentioning code elements.`,
-		stats["file_count"],
-		stats["entity_count"],
-		stats["dependency_count"])
+		stats["files"],
+		stats["entities"],
+		stats["dependencies"])
 
 	messages := []*llm.Message{
 		{Role: "system", Content: systemPrompt},
@@ -100,11 +100,8 @@ Documentation: %s`,
 		entity.Documentation)
 
 	if callGraph != nil {
-		if callers, ok := callGraph["callers"]; ok {
-			contextStr += fmt.Sprintf("\n\nCalled by: %v", callers)
-		}
-		if callees, ok := callGraph["callees"]; ok {
-			contextStr += fmt.Sprintf("\nCalls: %v", callees)
+		if calls, ok := callGraph["calls"]; ok {
+			contextStr += fmt.Sprintf("\n\nCalls: %v", calls)
 		}
 	}
 
@@ -166,8 +163,8 @@ Current Documentation: %s`,
 		entity.Documentation)
 
 	if callGraph != nil {
-		if callees, ok := callGraph["callees"]; ok {
-			contextStr += fmt.Sprintf("\nDependencies: %v", callees)
+		if calls, ok := callGraph["calls"]; ok {
+			contextStr += fmt.Sprintf("\nDependencies (calls): %v", calls)
 		}
 	}
 
@@ -236,11 +233,8 @@ Location: %s (lines %d-%d)`,
 		entity.EndLine)
 
 	if callGraph != nil {
-		if callers, ok := callGraph["callers"]; ok {
-			contextStr += fmt.Sprintf("\nCalled by: %v", callers)
-		}
-		if callees, ok := callGraph["callees"]; ok {
-			contextStr += fmt.Sprintf("\nCalls: %v", callees)
+		if calls, ok := callGraph["calls"]; ok {
+			contextStr += fmt.Sprintf("\nCalls: %v", calls)
 		}
 	}
 

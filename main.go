@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -264,17 +265,80 @@ func handleMCP(graphDB *string) {
 	idx := indexer.New(database)
 	mcpServer := mcp.New(idx)
 
-	fmt.Println("MCP Server started")
-	fmt.Println("Available tools:")
-	for _, tool := range mcpServer.GetTools() {
-		fmt.Printf("  - %s: %s\n", tool.Name, tool.Description)
-	}
-	fmt.Println("\nMCP server is running. Send JSON-RPC requests for tool invocation.")
+	// MCP JSON-RPC 2.0 server over stdin/stdout
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 
-	// Simple echo server for tool requests
-	// In a real scenario, this would integrate with the actual MCP protocol
-	// For now, we just keep the server running
-	select {}
+		var req map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &req); err != nil {
+			writeJSONRPCError(nil, -32700, "Parse error")
+			continue
+		}
+
+		id := req["id"]
+		method, _ := req["method"].(string)
+
+		switch method {
+		case "initialize":
+			writeJSONRPCResult(id, map[string]interface{}{
+				"protocolVersion": "2024-11-05",
+				"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
+				"serverInfo":      map[string]interface{}{"name": "codecontext", "version": version},
+			})
+
+		case "tools/list":
+			tools := mcpServer.GetTools()
+			writeJSONRPCResult(id, map[string]interface{}{"tools": tools})
+
+		case "tools/call":
+			params, _ := req["params"].(map[string]interface{})
+			toolName, _ := params["name"].(string)
+			arguments, _ := params["arguments"].(map[string]interface{})
+			if arguments == nil {
+				arguments = map[string]interface{}{}
+			}
+			result, err := mcpServer.CallTool(toolName, arguments)
+			if err != nil {
+				writeJSONRPCError(id, -32603, err.Error())
+				continue
+			}
+			writeJSONRPCResult(id, map[string]interface{}{
+				"content": []map[string]interface{}{
+					{"type": "text", "text": mcp.SerializeToolResult(result)},
+				},
+			})
+
+		default:
+			writeJSONRPCError(id, -32601, "Method not found")
+		}
+	}
+}
+
+func writeJSONRPCResult(id interface{}, result interface{}) {
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  result,
+	}
+	data, _ := json.Marshal(resp)
+	fmt.Println(string(data))
+}
+
+func writeJSONRPCError(id interface{}, code int, message string) {
+	resp := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]interface{}{
+			"code":    code,
+			"message": message,
+		},
+	}
+	data, _ := json.Marshal(resp)
+	fmt.Println(string(data))
 }
 
 func walkDir(dir string, exts map[string]bool) ([]string, error) {
