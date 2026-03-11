@@ -7,9 +7,10 @@ Aggregate source files into a single context block — useful for feeding code t
 - **File Aggregation**: Combine source files into a single context block (original functionality)
 - **Code Graph**: Index and analyze code relationships with an embedded SQLite database
 - **MCP Server**: Expose code graph queries via Model Context Protocol for Claude integration
-- **Multi-language Support**: Parse Go, JavaScript/TypeScript, and Python code
+- **Multi-language Auto-Detection**: Automatically detect and parse **Go, Python, Java, JavaScript, and TypeScript** code in mixed-language projects
+- **Recursive Indexing**: Scan entire project directories, automatically detecting language and extracting code structure
 - **Automatic Schema**: GORM-based ORM eliminates manual database setup
-- **Entity Extraction**: Automatically detect functions, classes, types, variables, and their relationships
+- **Entity Extraction**: Automatically detect functions, classes, types, variables, interfaces, methods, and their relationships
 
 ## Installation
 
@@ -49,11 +50,15 @@ codecontext -version
 
 ### Code Graph Analysis
 
-Build and query a code graph:
+Build and query a code graph with automatic language detection:
 
 ```sh
-# Index a directory
+# Index a directory (auto-detects all languages)
 codecontext index /path/to/project
+
+# Index a multi-language monorepo
+codecontext index /path/to/monorepo
+# Automatically finds: Go files, Python files, Java classes, JS/TS modules
 
 # Query for an entity (function, class, etc.)
 codecontext query entity functionName
@@ -67,6 +72,37 @@ codecontext query calls 1
 # Show graph statistics
 codecontext stats
 ```
+
+### Multi-Language Projects
+
+The `index` command automatically detects and processes files in multiple languages:
+
+```sh
+# Index a mixed-language project
+codecontext index my-project/
+
+# This will find and parse:
+# - Go files (.go)
+# - Python files (.py)
+# - Java files (.java)
+# - JavaScript/TypeScript files (.js, .ts, .jsx, .tsx)
+
+# Result:
+# ✓ Indexing complete. Database: .codecontext.db
+#
+# Code Graph Statistics:
+#   Files:        245
+#   Entities:     3421
+#   Dependencies: 1204
+#   Relations:    0
+```
+
+**Supported Languages**:
+- **Go** - Full AST parsing with stdlib, functions, methods, types, interfaces, fields
+- **Python** - Function and class detection, decorator tracking
+- **Java** - Class, interface, enum, record, and method extraction
+- **JavaScript/TypeScript** - Functions, classes, interfaces (TS), type aliases, arrow functions, async functions
+- **More languages coming** - Framework supports easy addition of new parsers
 
 ### MCP Server
 
