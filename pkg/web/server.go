@@ -12,7 +12,10 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
+	"strings"
 
+	"github.com/RandomCodeSpace/codecontext/pkg/db"
 	"github.com/RandomCodeSpace/codecontext/pkg/indexer"
 )
 
@@ -32,6 +35,8 @@ func (s *Server) Listen(addr string) error {
 	mux.HandleFunc("/", s.handleUI)
 	mux.HandleFunc("/api/graph", s.handleGraph)
 	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/tree", s.handleTree)
+	mux.HandleFunc("/api/dir", s.handleDirDetail)
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -241,6 +246,268 @@ func splitPath(p string) []string {
 		parts = append(parts, cur)
 	}
 	return parts
+}
+
+// --------------------------------------------------------------------------
+// Tree endpoint — lightweight directory hierarchy for the icicle chart
+// --------------------------------------------------------------------------
+
+// treeNode is a node in the directory/file hierarchy returned by /api/tree.
+type treeNode struct {
+	Name     string      `json:"name"`
+	Path     string      `json:"path"`
+	Count    int         `json:"count"` // total files under this node
+	Lang     string      `json:"lang,omitempty"`
+	Children []*treeNode `json:"children,omitempty"`
+}
+
+func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	files, err := s.idx.GetAllFiles()
+	if err != nil {
+		http.Error(w, `{"error":"failed to load files"}`, http.StatusInternalServerError)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(buildFileTree(files))
+}
+
+func buildFileTree(files []*db.File) *treeNode {
+	type trieN struct {
+		path     string
+		lang     string // set only for leaf (file) nodes
+		domLang  string // dominant language in subtree
+		count    int
+		children map[string]*trieN
+	}
+
+	root := &trieN{path: "", children: map[string]*trieN{}}
+
+	for _, f := range files {
+		parts := splitPath(f.Path)
+		cur := root
+		cur.count++
+		for i, part := range parts {
+			child, ok := cur.children[part]
+			if !ok {
+				var p string
+				if cur.path == "" {
+					p = part
+				} else {
+					p = cur.path + "/" + part
+				}
+				child = &trieN{path: p, children: map[string]*trieN{}}
+				cur.children[part] = child
+			}
+			child.count++
+			if i == len(parts)-1 {
+				child.lang = f.Language
+			}
+			cur = child
+		}
+	}
+
+	// Compute dominant language bottom-up.
+	var dominantLang func(*trieN) string
+	dominantLang = func(n *trieN) string {
+		if n.lang != "" {
+			n.domLang = n.lang
+			return n.lang
+		}
+		counts := map[string]int{}
+		for _, child := range n.children {
+			l := dominantLang(child)
+			if l != "" {
+				counts[l] += child.count
+			}
+		}
+		best, bestN := "", 0
+		for l, c := range counts {
+			if c > bestN {
+				bestN = c
+				best = l
+			}
+		}
+		n.domLang = best
+		return best
+	}
+	dominantLang(root)
+
+	var convert func(*trieN, string) *treeNode
+	convert = func(n *trieN, name string) *treeNode {
+		tn := &treeNode{Name: name, Path: n.path, Count: n.count, Lang: n.domLang}
+		for childName, child := range n.children {
+			tn.Children = append(tn.Children, convert(child, childName))
+		}
+		sort.Slice(tn.Children, func(i, j int) bool {
+			return tn.Children[i].Count > tn.Children[j].Count
+		})
+		return tn
+	}
+	return convert(root, ".")
+}
+
+// --------------------------------------------------------------------------
+// Dir detail endpoint — dependency & entity summary for a directory/file
+// --------------------------------------------------------------------------
+
+type dirDetail struct {
+	Path        string         `json:"path"`
+	FileCount   int            `json:"fileCount"`
+	ImportsFrom []string       `json:"importsFrom"`
+	ImportedBy  []string       `json:"importedBy"`
+	TopFiles    []string       `json:"topFiles"`
+	TopEntities []entityBrief  `json:"topEntities"`
+}
+
+type entityBrief struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	File string `json:"file"`
+}
+
+func (s *Server) handleDirDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	dirPath := r.URL.Query().Get("path")
+
+	files, err := s.idx.GetAllFiles()
+	if err != nil {
+		http.Error(w, `{"error":"failed to load files"}`, http.StatusInternalServerError)
+		return
+	}
+
+	fileByID := make(map[int64]*db.File, len(files))
+	var dirFiles []*db.File
+	dirFileIDs := map[int64]bool{}
+	for _, f := range files {
+		fileByID[f.ID] = f
+		if isUnderPath(f.Path, dirPath) {
+			dirFiles = append(dirFiles, f)
+			dirFileIDs[f.ID] = true
+		}
+	}
+
+	deps, err := s.idx.GetAllDependencies()
+	if err != nil {
+		http.Error(w, `{"error":"failed to load deps"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Build basename → [path…] and path → id indexes for import resolution.
+	baseToPaths := map[string][]string{}
+	pathToID := map[string]int64{}
+	for _, f := range files {
+		base := filepath.Base(f.Path)
+		baseToPaths[base] = append(baseToPaths[base], f.Path)
+		pathToID[f.Path] = f.ID
+	}
+
+	importFrom := map[string]bool{}
+	importedBy := map[string]bool{}
+
+	for _, dep := range deps {
+		targetID := resolveDepToID(dep.TargetPath, baseToPaths, pathToID)
+		if dirFileIDs[dep.SourceFileID] {
+			// Outgoing: this dir's file imports something outside.
+			if targetID != 0 {
+				if tf, ok := fileByID[targetID]; ok && !dirFileIDs[tf.ID] {
+					importFrom[dirOfPath(tf.Path)] = true
+				}
+			}
+		} else if targetID != 0 && dirFileIDs[targetID] {
+			// Incoming: another file imports something in this dir.
+			if sf, ok := fileByID[dep.SourceFileID]; ok {
+				importedBy[dirOfPath(sf.Path)] = true
+			}
+		}
+	}
+
+	// Top files (first 20).
+	topFiles := make([]string, 0, 20)
+	for i, f := range dirFiles {
+		if i >= 20 {
+			break
+		}
+		topFiles = append(topFiles, filepath.Base(f.Path))
+	}
+
+	// Top entities (scan first 10 files, cap at 30 entities).
+	var topEntities []entityBrief
+	for i, f := range dirFiles {
+		if i >= 10 || len(topEntities) >= 30 {
+			break
+		}
+		ents, err := s.idx.GetEntitiesByFile(f.ID)
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			if len(topEntities) >= 30 {
+				break
+			}
+			topEntities = append(topEntities, entityBrief{Name: e.Name, Type: e.Type, File: filepath.Base(f.Path)})
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(dirDetail{
+		Path:        dirPath,
+		FileCount:   len(dirFiles),
+		ImportsFrom: sortedKeys(importFrom),
+		ImportedBy:  sortedKeys(importedBy),
+		TopFiles:    topFiles,
+		TopEntities: topEntities,
+	})
+}
+
+func isUnderPath(filePath, dirPath string) bool {
+	if dirPath == "" || dirPath == "." {
+		return true
+	}
+	return filePath == dirPath ||
+		strings.HasPrefix(filePath, dirPath+"/") ||
+		strings.HasPrefix(filePath, dirPath+"\\")
+}
+
+func dirOfPath(p string) string {
+	parts := splitPath(p)
+	if len(parts) <= 1 {
+		return "."
+	}
+	return strings.Join(parts[:len(parts)-1], "/")
+}
+
+func resolveDepToID(targetPath string, baseToPaths map[string][]string, pathToID map[string]int64) int64 {
+	norm := strings.ReplaceAll(targetPath, ".", "/")
+	base := filepath.Base(norm)
+	if base == "" || base == "." {
+		return 0
+	}
+	candidates := []string{base}
+	if filepath.Ext(base) == "" {
+		for _, ext := range []string{".java", ".go", ".py", ".js", ".ts"} {
+			candidates = append(candidates, base+ext)
+		}
+	}
+	for _, cand := range candidates {
+		for _, p := range baseToPaths[cand] {
+			if pathSuffixMatch(p, norm) {
+				return pathToID[p]
+			}
+		}
+	}
+	return 0
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // pathSuffixMatch returns true if the file path ends with the import path.
