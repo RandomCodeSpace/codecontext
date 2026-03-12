@@ -200,8 +200,8 @@ func handleIndex(graphDB *string, args []string, verbose bool) {
 	stats, _ := idx.GetStats()
 	fmt.Printf("✅ Indexing complete!\n")
 	fmt.Printf("   📄 Files:        %v\n", stats["files"])
-	fmt.Printf("   📝 LOC:          %v\n", stats["lines_of_code"])
-	fmt.Printf("   🪙  Tokens:       %v\n", stats["tokens"])
+	fmt.Printf("   📝 LOC:          %v\n", formatCount(stats["lines_of_code"]))
+	fmt.Printf("   🪙  Tokens:       %v\n", formatCount(stats["tokens"]))
 	fmt.Printf("   🧩 Entities:     %v\n", stats["entities"])
 	fmt.Printf("   🔗 Relations:    %v\n", stats["relations"])
 	fmt.Printf("   📦 Dependencies: %v\n", stats["dependencies"])
@@ -437,8 +437,8 @@ func handleStats(graphDB *string, verbose bool) {
 
 	fmt.Println("📊 Code Graph Statistics:")
 	fmt.Printf("   📄 Files:        %v\n", stats["files"])
-	fmt.Printf("   📝 Lines of Code:%v\n", stats["lines_of_code"])
-	fmt.Printf("   🪙  Tokens:       %v\n", stats["tokens"])
+	fmt.Printf("   📝 LOC:          %v\n", formatCount(stats["lines_of_code"]))
+	fmt.Printf("   🪙  Tokens:       %v\n", formatCount(stats["tokens"]))
 	fmt.Printf("   🧩 Entities:     %v\n", stats["entities"])
 	fmt.Printf("   📦 Dependencies: %v\n", stats["dependencies"])
 	fmt.Printf("   🔗 Relations:    %v\n", stats["relations"])
@@ -757,4 +757,37 @@ func printFile(path string) error {
 func printJSON(v interface{}) {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	fmt.Println(string(data))
+}
+
+func formatCount(v interface{}) string {
+	var n int64
+	switch val := v.(type) {
+	case int:
+		n = int64(val)
+	case int32:
+		n = int64(val)
+	case int64:
+		n = val
+	case float64:
+		n = int64(val)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+
+	format := func(val float64, suffix string) string {
+		s := fmt.Sprintf("%.1f", val)
+		s = strings.TrimSuffix(s, ".0")
+		return fmt.Sprintf("%d (%s%s)", n, s, suffix)
+	}
+
+	if n >= 1_000_000_000 {
+		return format(float64(n)/1_000_000_000.0, "B")
+	}
+	if n >= 1_000_000 {
+		return format(float64(n)/1_000_000.0, "M")
+	}
+	if n >= 1_000 {
+		return format(float64(n)/1_000.0, "K")
+	}
+	return fmt.Sprintf("%d", n)
 }
