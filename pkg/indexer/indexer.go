@@ -52,10 +52,18 @@ func (idx *Indexer) log(format string, args ...interface{}) {
 func (idx *Indexer) IndexFile(filePath string) error {
 	idx.log("  📄 Indexing %s", filePath)
 
+	idx.log("    📖 Reading & Hashing...")
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
+
+	linesOfCode := strings.Count(string(content), "\n")
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		linesOfCode++
+	}
+	// Estimate tokens as ~4 chars per token (standard heuristic)
+	tokens := len(content) / 4
 
 	hash := fmt.Sprintf("%x", md5.Sum(content))
 
@@ -86,6 +94,7 @@ func (idx *Indexer) IndexFile(filePath string) error {
 	}
 
 	// --- Parse (pure CPU, no lock needed) ---
+	idx.log("    ⚙️  Extracting entities & dependencies...")
 	parseResult, err := parser.Parse(filePath, string(content))
 	if err != nil {
 		return fmt.Errorf("failed to parse file: %w", err)
@@ -112,7 +121,7 @@ func (idx *Indexer) IndexFile(filePath string) error {
 	txErr := idx.db.GetDB().Transaction(func(tx *gorm.DB) error {
 		txDB := idx.db.WithTx(tx)
 
-		fileID, err := txDB.InsertFile(filePath, string(parseResult.Language), hash)
+		fileID, err := txDB.InsertFile(filePath, string(parseResult.Language), hash, linesOfCode, tokens)
 		if err != nil {
 			return fmt.Errorf("failed to insert file: %w", err)
 		}
@@ -361,11 +370,15 @@ func (idx *Indexer) GetStats() (map[string]interface{}, error) {
 	entityCount, _ := idx.db.GetEntityCount()
 	depCount, _ := idx.db.GetDependencyCount()
 	relCount, _ := idx.db.GetRelationCount()
+	locCount, _ := idx.db.GetLinesOfCodeCount()
+	tokensCount, _ := idx.db.GetTokensCount()
 	return map[string]interface{}{
-		"files":        fileCount,
-		"entities":     entityCount,
-		"dependencies": depCount,
-		"relations":    relCount,
+		"files":         fileCount,
+		"entities":      entityCount,
+		"dependencies":  depCount,
+		"relations":     relCount,
+		"lines_of_code": locCount,
+		"tokens":        tokensCount,
 	}, nil
 }
 

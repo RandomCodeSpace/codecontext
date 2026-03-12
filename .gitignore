@@ -2,3 +2,5 @@ codecontext
 *.db
 .env.local
 .codecontext*
+*.out
+pulsar-master/

@@ -200,6 +200,8 @@ func handleIndex(graphDB *string, args []string, verbose bool) {
 	stats, _ := idx.GetStats()
 	fmt.Printf("✅ Indexing complete!\n")
 	fmt.Printf("   📄 Files:        %v\n", stats["files"])
+	fmt.Printf("   📝 LOC:          %v\n", stats["lines_of_code"])
+	fmt.Printf("   🪙  Tokens:       %v\n", stats["tokens"])
 	fmt.Printf("   🧩 Entities:     %v\n", stats["entities"])
 	fmt.Printf("   🔗 Relations:    %v\n", stats["relations"])
 	fmt.Printf("   📦 Dependencies: %v\n", stats["dependencies"])
@@ -435,6 +437,8 @@ func handleStats(graphDB *string, verbose bool) {
 
 	fmt.Println("📊 Code Graph Statistics:")
 	fmt.Printf("   📄 Files:        %v\n", stats["files"])
+	fmt.Printf("   📝 Lines of Code:%v\n", stats["lines_of_code"])
+	fmt.Printf("   🪙  Tokens:       %v\n", stats["tokens"])
 	fmt.Printf("   🧩 Entities:     %v\n", stats["entities"])
 	fmt.Printf("   📦 Dependencies: %v\n", stats["dependencies"])
 	fmt.Printf("   🔗 Relations:    %v\n", stats["relations"])

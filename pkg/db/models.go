@@ -4,11 +4,13 @@ import "gorm.io/gorm"
 
 // File represents a source file in the codebase
 type File struct {
-	ID        int64      `gorm:"primaryKey"`
-	Path      string     `gorm:"uniqueIndex;not null"`
-	Language  string     `gorm:"not null"`
-	Hash      string
-	Entities  []Entity   `gorm:"foreignKey:FileID;constraint:OnDelete:CASCADE"`
+	ID           int64      `gorm:"primaryKey"`
+	Path         string     `gorm:"uniqueIndex;not null"`
+	Language     string     `gorm:"not null"`
+	Hash         string
+	LinesOfCode  int
+	Tokens       int
+	Entities     []Entity     `gorm:"foreignKey:FileID;constraint:OnDelete:CASCADE"`
 	Dependencies []Dependency `gorm:"foreignKey:SourceFileID;constraint:OnDelete:CASCADE"`
 }
 

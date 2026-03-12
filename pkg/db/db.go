@@ -69,11 +69,11 @@ func (db *Database) Close() error {
 
 // InsertFile upserts a file record.  If the path already exists the hash and
 // language are updated and the existing ID is returned.
-func (db *Database) InsertFile(path, language, hash string) (int64, error) {
+func (db *Database) InsertFile(path, language, hash string, linesOfCode, tokens int) (int64, error) {
 	var file File
 	result := db.conn.Where("path = ?", path).First(&file)
 	if result.Error == gorm.ErrRecordNotFound {
-		file = File{Path: path, Language: language, Hash: hash}
+		file = File{Path: path, Language: language, Hash: hash, LinesOfCode: linesOfCode, Tokens: tokens}
 		if err := db.conn.Create(&file).Error; err != nil {
 			return 0, fmt.Errorf("failed to insert file: %w", err)
 		}
@@ -84,8 +84,10 @@ func (db *Database) InsertFile(path, language, hash string) (int64, error) {
 	}
 	// Existing file — update metadata in case language or hash changed.
 	if err := db.conn.Model(&file).Updates(map[string]interface{}{
-		"language": language,
-		"hash":     hash,
+		"language":      language,
+		"hash":          hash,
+		"lines_of_code": linesOfCode,
+		"tokens":        tokens,
 	}).Error; err != nil {
 		return 0, fmt.Errorf("failed to update file: %w", err)
 	}
@@ -359,6 +361,16 @@ func (db *Database) GetDependencyGraph(filePath string) (map[string]interface{},
 func (db *Database) GetFileCount() (int64, error) {
 	var count int64
 	return count, db.conn.Model(&File{}).Count(&count).Error
+}
+
+func (db *Database) GetLinesOfCodeCount() (int64, error) {
+	var sum int64
+	return sum, db.conn.Model(&File{}).Select("COALESCE(SUM(lines_of_code), 0)").Row().Scan(&sum)
+}
+
+func (db *Database) GetTokensCount() (int64, error) {
+	var sum int64
+	return sum, db.conn.Model(&File{}).Select("COALESCE(SUM(tokens), 0)").Row().Scan(&sum)
 }
 
 func (db *Database) GetEntityCount() (int64, error) {
