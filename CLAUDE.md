@@ -28,7 +28,7 @@ go vet ./...
 # Start MCP server (stdio)
 ./codecontext mcp
 
-# Start MCP server (HTTP)
+# Start MCP server (HTTP, Streamable HTTP transport)
 ./codecontext mcp -http -addr :8081
 
 # Start web UI
@@ -38,28 +38,39 @@ go vet ./...
 ## Architecture
 
 ```
-main.go                          CLI entry point, command routing (~800 lines)
+main.go                          CLI entry point, command routing
 pkg/
 ├── db/
 │   ├── db.go                    GORM/SQLite operations (Open, Insert*, Get*, Delete*)
 │   └── models.go                Schema: File, Entity, Dependency, EntityRelation
 ├── parser/
 │   ├── parser.go                Language router + convert*ParseResult adapters
+│   ├── types.go                 Common types: ParseResult, Entity, Dependency, Language
 │   ├── parser_ast_test.go       Parser tests (Python, JS, Java)
 │   ├── go/parser.go             Go: stdlib go/ast
-│   ├── python/parser.go         Python: indentation-aware line scanner
-│   ├── javascript/parser.go     JS/TS: two-pass tokenizer + brace-depth
-│   └── java/parser.go           Java: two-pass tokenizer + brace-depth
+│   ├── python/parser.go         Python: tree-sitter AST
+│   ├── javascript/parser.go     JS/TS: tree-sitter AST
+│   └── java/parser.go           Java: tree-sitter AST
 ├── indexer/
 │   └── indexer.go               Parallel file indexer with worker pool
 ├── mcp/
-│   └── server.go                MCP server (stdio + HTTP transport)
+│   └── server.go                MCP server (official Go SDK, stdio + Streamable HTTP)
 ├── web/
 │   ├── server.go                Web server (/api/graph, /api/stats)
 │   └── ui.go                    Embedded SPA (HTML/CSS/JS in Go const)
 ├── llm/                         LLM provider abstraction (Ollama, Azure, OpenAI)
 └── ai/                          AI analysis chains (query, analyze, docs, review)
 ```
+
+## Key Dependencies
+
+| Dependency | Purpose |
+|---|---|
+| `github.com/smacker/go-tree-sitter` | Tree-sitter Go bindings for Python, JS/TS, Java parsing |
+| `github.com/modelcontextprotocol/go-sdk/mcp` | Official MCP Go SDK (server, tools, transports) |
+| `gorm.io/gorm` + `gorm.io/driver/sqlite` | ORM + SQLite database |
+| `github.com/sashabaranov/go-openai` | OpenAI API client (for AI features) |
+| `github.com/sabhiram/go-gitignore` | .gitignore pattern matching |
 
 ## Key Patterns
 
@@ -70,14 +81,20 @@ pkg/
 - Foreign keys with CASCADE deletes — deleting a File cleans up its entities and deps.
 - `FirstOrCreate` pattern prevents duplicate inserts (entities, deps, relations).
 
-### Parsers
+### Parsers (tree-sitter)
 - Each language has its own package under `pkg/parser/{lang}/` with its own types.
 - `pkg/parser/parser.go` routes by file extension and converts sub-parser results to the common `parser.ParseResult` type via `convert*ParseResult` functions.
 - **Go parser** uses stdlib `go/ast` — the most accurate parser.
-- **Python/JS/Java parsers** are hand-written scanners (no AST libraries). They work by:
-  1. Stripping string literals and comments (preserving line structure)
-  2. Matching keywords line-by-line with scope tracking (indent for Python, braces for JS/Java)
+- **Python, JavaScript/TypeScript, and Java parsers** use **tree-sitter** (`github.com/smacker/go-tree-sitter`):
+  - Each parser creates a `sitter.NewParser()`, sets the language grammar, and calls `parser.ParseCtx()`.
+  - AST walking is done via `node.NamedChild(i)` and `node.ChildByFieldName("name")`.
+  - Node text is extracted via `node.Content(src)` where `src` is the `[]byte` source.
+  - Line numbers use `node.StartPoint().Row + 1` (tree-sitter is 0-indexed).
 - Parsers extract: entities (functions, methods, classes, types), dependencies (imports), and parent-child relationships.
+- Tree-sitter grammars used:
+  - `github.com/smacker/go-tree-sitter/python` — Python
+  - `github.com/smacker/go-tree-sitter/javascript` — JavaScript (also used for TypeScript)
+  - `github.com/smacker/go-tree-sitter/java` — Java
 
 ### Indexer
 - Worker pool with `min(8, numCPU)` goroutines.
@@ -86,12 +103,15 @@ pkg/
 - File change detection via MD5 hash — unchanged files are skipped on re-index.
 - Respects `.gitignore` and `.ignore` files at any directory level.
 
-### MCP Server
-- **Stdio transport**: line-delimited JSON-RPC 2.0 on stdin/stdout (default).
-- **HTTP transport**: `POST /mcp` for JSON-RPC, `GET /mcp/tools` for tool listing.
-- Protocol version: `2025-03-26` (Streamable HTTP).
-- The `Dispatch()` method is transport-agnostic — both transports call it.
-- Error responses map JSON-RPC codes to HTTP status codes (400, 404, 500).
+### MCP Server (official Go SDK)
+- Uses `github.com/modelcontextprotocol/go-sdk/mcp` (aliased as `mcpsdk` in code).
+- `Server` struct wraps `*mcpsdk.Server` and exposes `Inner()` for transport access.
+- Tools are registered via `mcpsdk.AddTool(server, &mcpsdk.Tool{...}, handler)` with typed input structs.
+  - Input schemas are **auto-generated** from Go struct tags: `json:"name" jsonschema:"description"`.
+  - Handler signature: `func(ctx, *mcpsdk.CallToolRequest, ArgsStruct) (*mcpsdk.CallToolResult, any, error)`.
+- **Stdio transport**: `mcpServer.Inner().Run(ctx, &mcpsdk.StdioTransport{})` — handles all JSON-RPC.
+- **HTTP transport**: `mcpsdk.NewStreamableHTTPHandler(getServer, nil)` — Streamable HTTP (MCP 2025-03-26+).
+- Six tools registered: `index_directory`, `query_entity`, `query_call_graph`, `query_dependencies`, `graph_stats`, `get_docs`.
 
 ### Web UI
 - Entirely self-contained — the whole SPA is a Go string constant in `pkg/web/ui.go`.
@@ -101,7 +121,7 @@ pkg/
 
 ## Code Conventions
 
-- **Go version**: 1.22+ (uses `go/ast`, no generics in project code)
+- **Go version**: 1.24+ (uses generics in MCP SDK integration)
 - **Error handling**: Return `fmt.Errorf("context: %w", err)` with wrapping.
 - **Logging**: `log/slog` JSON handler to stderr (MCP server). `fmt.Printf` for CLI output.
 - **No external test framework** — stdlib `testing` only.
@@ -129,16 +149,19 @@ go test ./...
 ## Common Tasks
 
 ### Adding a new parser language
-1. Create `pkg/parser/{lang}/parser.go` with its own types (`ParseResult`, `Entity`, `Dependency`).
-2. Add a `convert{Lang}ParseResult` function in `pkg/parser/parser.go`.
-3. Add the language constant and extension mapping in `detectLanguage()`.
-4. Add the extension(s) to `isSourceFile()` in `pkg/indexer/indexer.go`.
-5. Add tests in `pkg/parser/parser_ast_test.go`.
+1. `go get github.com/smacker/go-tree-sitter/{lang}` to add the tree-sitter grammar.
+2. Create `pkg/parser/{lang}/parser.go` — create a `sitter.NewParser()`, set the language, walk the AST.
+3. Define the same output types (`ParseResult`, `Entity`, `Dependency`) in that package.
+4. Add a `convert{Lang}ParseResult` function in `pkg/parser/parser.go`.
+5. Add the language constant and extension mapping in `detectLanguage()` in `pkg/parser/parser.go`.
+6. Add the extension(s) to `isSourceFile()` in `pkg/indexer/indexer.go`.
+7. Add tests in `pkg/parser/parser_ast_test.go`.
 
 ### Adding a new MCP tool
-1. Add the tool definition to `GetTools()` in `pkg/mcp/server.go`.
-2. Add the method case to `dispatch()` and `CallTool()`.
-3. Implement the handler method on `*Server`.
+1. Define an input args struct with `json` and `jsonschema` tags in `pkg/mcp/server.go`.
+2. Register the tool via `mcpsdk.AddTool(s.inner, &mcpsdk.Tool{Name: "...", Description: "..."}, s.handler)` in `registerTools()`.
+3. Implement the handler method on `*Server` with signature: `func(ctx, *mcpsdk.CallToolRequest, ArgsType) (*mcpsdk.CallToolResult, any, error)`.
+4. Return results via `textResult(serializeJSON(data))` helper.
 
 ### Modifying the web UI
 - Edit the HTML/CSS/JS string in `pkg/web/ui.go`.
@@ -154,19 +177,21 @@ go test ./...
 ## Known Limitations
 
 - **No call graph analysis**: Only "defines" relations (parent→child) are built. Actual function call detection is not implemented.
-- **Python/JS/Java parsers are heuristic**: They're line-based scanners, not full AST parsers. Edge cases (deeply nested closures, complex destructuring) may be missed.
+- **TypeScript uses JavaScript grammar**: The JS tree-sitter parser handles basic TS, but complex TS-specific syntax (decorators, advanced generics) may not be fully captured. Consider adding `github.com/smacker/go-tree-sitter/typescript/typescript` for full TS support.
 - **SQLite single-writer**: Despite the worker pool, all DB writes go through a single mutex. WAL mode helps reads but writes are still serialized.
 - **Web UI performance**: O(n^2) repulsion is skipped for graphs > 400 nodes. Large graphs (800+) hide entity nodes by default.
 
 ## File Dependencies (what touches what)
 
 ```
-main.go → all pkg/* packages
+main.go → all pkg/* packages, github.com/modelcontextprotocol/go-sdk/mcp
 pkg/indexer → pkg/parser, pkg/db
-pkg/mcp     → pkg/indexer (queries only)
+pkg/mcp     → pkg/db, pkg/indexer, github.com/modelcontextprotocol/go-sdk/mcp
 pkg/web     → pkg/indexer (queries only)
 pkg/ai      → pkg/llm, pkg/indexer
 pkg/parser  → pkg/parser/{go,python,javascript,java}
+pkg/parser/{python,javascript,java} → github.com/smacker/go-tree-sitter
+pkg/parser/go → stdlib go/ast (no external deps)
 pkg/db      → gorm, sqlite (no internal deps)
 ```
 
