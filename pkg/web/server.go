@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 
 	"github.com/RandomCodeSpace/codecontext/pkg/indexer"
 )
@@ -79,8 +80,8 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var nodes []graphNode
-	var edges []graphEdge
+	nodes := make([]graphNode, 0)
+	edges := make([]graphEdge, 0)
 
 	// File nodes.
 	fileIDToNodeID := make(map[int64]string)
@@ -134,20 +135,47 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dependency edges between files (best-effort: resolve by target path suffix).
-	pathToFileNode := make(map[string]string)
-	for _, f := range files {
-		pathToFileNode[f.Path] = fileIDToNodeID[f.ID]
+	// Build a basename → [(path, nodeID)] index so resolution is O(1) per dep
+	// instead of O(files) per dep.
+	type fileEntry struct {
+		path string
+		nid  string
 	}
+	baseIndex := make(map[string][]fileEntry)
+	for _, f := range files {
+		base := filepath.Base(f.Path)
+		baseIndex[base] = append(baseIndex[base], fileEntry{f.Path, fileIDToNodeID[f.ID]})
+	}
+
 	for _, dep := range deps {
 		srcNode, ok := fileIDToNodeID[dep.SourceFileID]
 		if !ok {
 			continue
 		}
-		// Try to find a matching file node by path suffix.
-		tgtNode := ""
-		for path, nid := range pathToFileNode {
-			if pathSuffixMatch(path, dep.TargetPath) {
-				tgtNode = nid
+		// Resolve by trying the import path's basename (with common extensions).
+		importBase := filepath.Base(dep.TargetPath)
+		// Strip leading dots from relative imports.
+		for len(importBase) > 0 && importBase[0] == '.' {
+			importBase = importBase[1:]
+		}
+		if importBase == "" {
+			continue
+		}
+		candidates := []string{importBase}
+		if filepath.Ext(importBase) == "" {
+			for _, ext := range []string{".go", ".py", ".js", ".ts", ".jsx", ".tsx", ".java"} {
+				candidates = append(candidates, importBase+ext)
+			}
+		}
+		var tgtNode string
+		for _, cand := range candidates {
+			for _, entry := range baseIndex[cand] {
+				if pathSuffixMatch(entry.path, dep.TargetPath) {
+					tgtNode = entry.nid
+					break
+				}
+			}
+			if tgtNode != "" {
 				break
 			}
 		}

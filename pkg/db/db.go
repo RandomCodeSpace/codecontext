@@ -32,6 +32,12 @@ func Open(dbPath string, verbose bool) (*Database, error) {
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
+	// WAL mode allows concurrent reads during writes — significant speedup
+	// for the parallel indexer that reads hash checks while others write.
+	if err := conn.Exec("PRAGMA journal_mode = WAL").Error; err != nil {
+		return nil, fmt.Errorf("failed to set WAL mode: %w", err)
+	}
+
 	db := &Database{conn: conn}
 	if err := db.migrate(); err != nil {
 		return nil, err

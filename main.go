@@ -14,8 +14,9 @@ import (
 	"github.com/RandomCodeSpace/codecontext/pkg/db"
 	"github.com/RandomCodeSpace/codecontext/pkg/indexer"
 	"github.com/RandomCodeSpace/codecontext/pkg/llm"
-	"github.com/RandomCodeSpace/codecontext/pkg/mcp"
+	ccmcp "github.com/RandomCodeSpace/codecontext/pkg/mcp"
 	"github.com/RandomCodeSpace/codecontext/pkg/web"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var version = "dev"
@@ -487,12 +488,11 @@ func handleMCP(graphDB *string, args []string) {
 	defer database.Close()
 
 	idx := indexer.New(database)
-	mcpServer := mcp.New(idx, version)
+	mcpServer := ccmcp.New(idx, version)
 
 	if *useHTTP {
 		fmt.Fprintf(os.Stderr, "🔌 MCP HTTP server listening on http://localhost%s\n", *addr)
-		fmt.Fprintf(os.Stderr, "   POST /mcp        JSON-RPC 2.0 endpoint\n")
-		fmt.Fprintf(os.Stderr, "   GET  /mcp/tools   list available tools\n")
+		fmt.Fprintf(os.Stderr, "   POST /mcp        Streamable HTTP endpoint\n")
 		if err := mcpServer.ListenHTTP(*addr); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ MCP HTTP server error: %v\n", err)
 			os.Exit(1)
@@ -502,63 +502,10 @@ func handleMCP(graphDB *string, args []string) {
 
 	fmt.Fprintln(os.Stderr, `{"level":"INFO","msg":"mcp stdio server ready","db":"`+*graphDB+`"}`)
 
-	const maxScannerBuf = 16 * 1024 * 1024 // 16 MB — handles large tool payloads
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, maxScannerBuf), maxScannerBuf)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		var req map[string]interface{}
-		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			writeJSONRPCError(nil, -32700, "Parse error")
-			continue
-		}
-
-		id := req["id"]
-		method, _ := req["method"].(string)
-		params, _ := req["params"].(map[string]interface{})
-		if params == nil {
-			params = map[string]interface{}{}
-		}
-
-		result, err := mcpServer.Dispatch(method, params)
-		if err != nil {
-			code := -32603
-			if rpcE, ok := err.(*mcp.RPCError); ok {
-				code = rpcE.Code
-			}
-			writeJSONRPCError(id, code, err.Error())
-			continue
-		}
-		// Notifications (nil result, no id) expect no response.
-		if result == nil {
-			continue
-		}
-		writeJSONRPCResult(id, result)
+	if err := mcpServer.Inner().Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ MCP stdio server error: %v\n", err)
+		os.Exit(1)
 	}
-
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, `{"level":"ERROR","msg":"stdio scanner error","error":"%s"}`+"\n", err.Error())
-	}
-}
-
-func writeJSONRPCResult(id interface{}, result interface{}) {
-	resp := map[string]interface{}{"jsonrpc": "2.0", "id": id, "result": result}
-	data, _ := json.Marshal(resp)
-	fmt.Println(string(data))
-}
-
-func writeJSONRPCError(id interface{}, code int, message string) {
-	resp := map[string]interface{}{
-		"jsonrpc": "2.0", "id": id,
-		"error": map[string]interface{}{"code": code, "message": message},
-	}
-	data, _ := json.Marshal(resp)
-	fmt.Println(string(data))
 }
 
 // --------------------------------------------------------------------------
