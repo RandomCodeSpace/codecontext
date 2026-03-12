@@ -175,6 +175,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--ac
         </svg>
         <p>Click any segment to explore<br>dependencies &amp; entities.</p>
       </div>
+      <div id="panel-content" style="display:none"></div>
     </div>
   </div>
 </div>
@@ -196,6 +197,8 @@ const panelHeader=document.getElementById('panel-header');
 const panelTitle=document.getElementById('panel-title');
 const panelMeta=document.getElementById('panel-meta');
 const panelBody=document.getElementById('panel-body');
+const panelHint=document.getElementById('panel-hint');
+const panelContent=document.getElementById('panel-content');
 const emptyHint=document.getElementById('empty-hint');
 
 function fmt(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n)}
@@ -398,13 +401,15 @@ function showPanelLoading(node){
   panelHeader.style.display='block';
   panelTitle.textContent=node.path||'.';
   panelMeta.textContent='Loading...';
-  document.getElementById('panel-hint').style.display='none';
-  panelBody.innerHTML='<div style="color:var(--text3);font-size:11px;padding:20px 0;text-align:center">Fetching details&#x2026;</div>';
+  panelHint.style.display='none';
+  panelContent.style.display='block';
+  panelContent.innerHTML='<div style="color:var(--text3);font-size:11px;padding:20px 0;text-align:center">Fetching details&#x2026;</div>';
 }
 
 function populatePanel(detail){
   panelHeader.style.display='block';
-  document.getElementById('panel-hint').style.display='none';
+  panelHint.style.display='none';
+  panelContent.style.display='block';
   var name=detail.path||'.';
   panelTitle.textContent=name;
   panelMeta.innerHTML='<span class="meta-chip">'+fmt(detail.fileCount)+' files</span>'
@@ -440,7 +445,7 @@ function populatePanel(detail){
     html+='</div></div>';
   }
   if(!html)html='<div style="color:var(--text3);font-size:11px;padding:16px 0">No dependency data for this path.</div>';
-  panelBody.innerHTML=html;
+  panelContent.innerHTML=html;
 }
 
 canvas.addEventListener('mousemove',function(e){
@@ -486,7 +491,9 @@ async function fetchDirDetail(path){
     if(!res.ok)throw new Error('HTTP '+res.status);
     populatePanel(await res.json());
   }catch(err){
-    panelBody.innerHTML='<div style="color:var(--danger);font-size:11px;padding:10px">Error loading details.</div>';
+    panelMeta.innerHTML='<span class="meta-chip" style="border-color:var(--danger);color:var(--danger)">Error</span>';
+    panelContent.style.display='block';
+    panelContent.innerHTML='<div style="color:var(--danger);font-size:11px;padding:10px">Error loading details.<br><span style="color:var(--text3)">'+esc(String(err))+'</span></div>';
     console.error('fetchDirDetail:',err);
   }
 }

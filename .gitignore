@@ -1,3 +1,4 @@
 codecontext
 *.db
 .env.local
+.codecontext*

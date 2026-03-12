@@ -38,6 +38,12 @@ func Open(dbPath string, verbose bool) (*Database, error) {
 		return nil, fmt.Errorf("failed to set WAL mode: %w", err)
 	}
 
+	// Busy timeout prevents immediate SQLITE_BUSY errors: SQLite will retry
+	// for up to 5 s when the database is locked by another connection/process.
+	if err := conn.Exec("PRAGMA busy_timeout = 5000").Error; err != nil {
+		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
+	}
+
 	db := &Database{conn: conn}
 	if err := db.migrate(); err != nil {
 		return nil, err
