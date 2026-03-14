@@ -74,6 +74,14 @@ class Database:
         if path.parent and str(path.parent) not in ("", "."):
             path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Clean up stale WAL/SHM sidecar files if the main DB was deleted.
+        # Without this, SQLite reconstructs a ghost database from leftover WAL.
+        if not path.exists():
+            for suffix in ("-wal", "-shm"):
+                sidecar = Path(str(path) + suffix)
+                if sidecar.exists():
+                    sidecar.unlink()
+
         conn = sqlite3.connect(db_path, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")

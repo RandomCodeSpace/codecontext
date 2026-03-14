@@ -322,24 +322,35 @@ class CogDatabase:
         file_id: int,
         rows: list[dict[str, Any]],
     ) -> list[int]:
-        """Insert multiple entities for a file. Returns assigned IDs."""
+        """Insert multiple entities for a file without duplicate checks.
+        Caller must ensure old entities were deleted first."""
         ids: list[int] = []
         for r in rows:
-            eid = self.insert_entity(
-                file_id=file_id,
-                name=r["name"],
-                entity_type=r["entity_type"],
-                kind=r.get("kind", ""),
-                signature=r.get("signature", ""),
-                start_line=r.get("start_line", 0),
-                end_line=r.get("end_line", 0),
-                docs=r.get("docs", ""),
-                parent=r.get("parent", ""),
-                visibility=r.get("visibility", ""),
-                scope=r.get("scope", ""),
-                language=r.get("language", ""),
-            )
-            ids.append(eid)
+            entity_id = self._alloc_id("entity")
+            node_id = f"entity:{entity_id}"
+            data = {
+                "id": entity_id,
+                "file_id": file_id,
+                "name": r["name"],
+                "type": r["entity_type"],
+                "kind": r.get("kind", ""),
+                "signature": r.get("signature", ""),
+                "start_line": r.get("start_line", 0),
+                "end_line": r.get("end_line", 0),
+                "column_start": 0,
+                "column_end": 0,
+                "documentation": r.get("docs", ""),
+                "parent": r.get("parent", ""),
+                "visibility": r.get("visibility", ""),
+                "scope": r.get("scope", ""),
+                "language": r.get("language", ""),
+                "attributes": "",
+            }
+            self._put_data(node_id, data)
+            self._add_ref(f"_idx:ef:{file_id}", node_id)
+            self._add_ref(f"_idx:en:{r['name']}", node_id)
+            self._add_ref("_all:entities", node_id)
+            ids.append(entity_id)
         return ids
 
     def batch_insert_dependencies(
@@ -347,18 +358,45 @@ class CogDatabase:
         file_id: int,
         rows: list[dict[str, Any]],
     ) -> int:
-        """Insert multiple dependencies. Returns count."""
+        """Insert multiple dependencies without duplicate checks.
+        Caller must ensure old dependencies were deleted first."""
         for r in rows:
-            self.insert_dependency(file_id, r["path"], r["type"], r.get("line_number", 0))
+            dep_id = self._alloc_id("dep")
+            node_id = f"dep:{dep_id}"
+            data = {
+                "id": dep_id,
+                "source_file_id": file_id,
+                "target_path": r["path"],
+                "import_type": r["type"],
+                "line_number": r.get("line_number", 0),
+                "resolved": "",
+                "is_local": False,
+            }
+            self._put_data(node_id, data)
+            self._add_ref(f"_idx:df:{file_id}", node_id)
+            self._add_ref("_all:deps", node_id)
         return len(rows)
 
     def batch_insert_relations(
         self,
         rows: list[tuple[int, int, str, int, str]],
     ) -> int:
-        """Insert multiple entity relations. Returns count."""
+        """Insert multiple entity relations without duplicate checks."""
         for src, tgt, rel_type, line, ctx in rows:
-            self.insert_entity_relation(src, tgt, rel_type, line, ctx)
+            rel_id = self._alloc_id("rel")
+            node_id = f"rel:{rel_id}"
+            data = {
+                "id": rel_id,
+                "source_entity_id": src,
+                "target_entity_id": tgt,
+                "relation_type": rel_type,
+                "line_number": line,
+                "context": ctx,
+            }
+            self._put_data(node_id, data)
+            self._add_ref(f"_idx:rs:{src}", node_id)
+            self._add_ref(f"_idx:rt:{tgt}", node_id)
+            self._add_ref("_all:relations", node_id)
         return len(rows)
 
     # ── Dependency operations ───────────────────────────────────────

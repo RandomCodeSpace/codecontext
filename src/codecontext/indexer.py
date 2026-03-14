@@ -407,7 +407,7 @@ class Indexer:
         total = len(paths)
 
         # Enable in-memory staging: all writes go to RAM, then bulk-sync to disk.
-        use_staging = total > 10 and self.backend == "sqlite"
+        use_staging = total > 10
         self._enable_staging(use_staging)
         staging_label = " staging=memory" if use_staging else ""
 
