@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   validate:
@@ -27,12 +28,37 @@ jobs:
           fi
 
   publish:
-    name: Tag and publish release
+    name: Tag, build, and publish release
     needs: validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Run test suite
+        run: uv run pytest -q
+
+      - name: Set package version from release tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          PKG_VERSION="${VERSION#v}"
+          sed -i "s/^version = \".*\"/version = \"${PKG_VERSION}\"/" pyproject.toml
+          echo "Using package version ${PKG_VERSION}"
+
+      - name: Build python distributions
+        run: uv build
 
       - name: Create tag and release
         env:
@@ -56,8 +82,6 @@ jobs:
             --generate-notes \
             $PRERELEASE_FLAG || \
             { echo "Release creation failed"; exit 1; }
-<<<<<<< Updated upstream
-=======
 
       - name: Upload distribution artifacts
         env:
@@ -65,17 +89,3 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           gh release upload "$VERSION" dist/* --clobber
-
-      - name: Publish prerelease to TestPyPI
-        if: ${{ contains(inputs.version, '-') }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
-          repository-url: https://test.pypi.org/legacy/
-
-      - name: Publish stable release to PyPI
-        if: ${{ !contains(inputs.version, '-') }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
->>>>>>> Stashed changes

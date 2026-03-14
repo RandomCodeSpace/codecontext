@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=70.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codecontext"
+version = "0.1.0"
+description = "Index source repositories into a code graph with CLI, MCP, Web API/UI, and AI analysis workflows"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "codecontext maintainers" }]
+maintainers = [{ name = "RandomCodeSpace" }]
+license = "MIT"
+keywords = [
+  "code-analysis",
+  "developer-tools",
+  "mcp",
+  "static-analysis",
+  "code-indexing",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+  "SQLAlchemy>=2.0",
+  "tree-sitter>=0.25",
+  "httpx>=0.27",
+  "openai>=1.0",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "falkordblite>=0.9.0; platform_system != 'Windows'",
+]
+
+[project.urls]
+Homepage = "https://github.com/RandomCodeSpace/codecontext"
+Repository = "https://github.com/RandomCodeSpace/codecontext"
+Documentation = "https://github.com/RandomCodeSpace/codecontext#readme"
+Changelog = "https://github.com/RandomCodeSpace/codecontext/releases"
+Issues = "https://github.com/RandomCodeSpace/codecontext/issues"
+Contact = "https://github.com/RandomCodeSpace/codecontext/issues/new/choose"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+codecontext = "codecontext.cli:run"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+codecontext = ["ui.html"]
+
+[tool.uv]
+default-groups = ["dev"]
