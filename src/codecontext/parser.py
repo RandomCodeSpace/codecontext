@@ -240,7 +240,7 @@ def _parse_js(file_path: str, content: str, language: str) -> ParseResult:
 
     fn_re = re.compile(r"^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)")
     class_re = re.compile(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)")
-    import_re = re.compile(r"^\s*import\s+.*?from\s+['\"]([^'\"]+)['\"]")
+    import_re = re.compile(r"""^\s*import\s+[^'"]*from\s+['"]([^'"]+)['"]""")
     require_re = re.compile(r"require\(['\"]([^'\"]+)['\"]\)")
 
     for i, line in enumerate(content.splitlines(), start=1):
@@ -301,7 +301,9 @@ def _parse_java(file_path: str, content: str) -> ParseResult:
 
     class_re = re.compile(r"^\s*(public\s+)?(class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)")
     method_re = re.compile(
-        r"^\s*(public|private|protected)?\s*(static\s+)?[A-Za-z0-9_<>\[\]]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{?"
+        r"^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native)\s+)*"
+        r"[A-Za-z0-9_<>\[\]]+\s+"
+        r"([A-Za-z_][A-Za-z0-9_]*)\s*\("
     )
     import_re = re.compile(r"^\s*import\s+([^;]+);")
 
@@ -334,8 +336,9 @@ def _parse_java(file_path: str, content: str) -> ParseResult:
 
         method = method_re.match(line)
         if method and " class " not in f" {line} ":
-            name = method.group(3)
-            vis = method.group(1) or "package"
+            name = method.group(1)
+            # Detect visibility from the line text directly.
+            vis = "public" if "public " in line else "private" if "private " in line else "protected" if "protected " in line else "package"
             entities.append(
                 Entity(
                     name=name,
