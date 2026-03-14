@@ -52,10 +52,18 @@ class FalkorLiteDatabase:
                 return cls(key, db, graph)
 
             db = FalkorDB(str(path))
-            cleanup = getattr(getattr(db, "client", None), "_cleanup", None)
+            client = getattr(db, "client", None)
+            cleanup = getattr(client, "_cleanup", None)
             if cleanup is not None:
                 try:
                     atexit.unregister(cleanup)
+                except Exception:
+                    pass
+            if client is not None:
+                # redislite may call cleanup from __del__ during interpreter teardown,
+                # where builtins can already be cleared, causing noisy NameError traces.
+                try:
+                    setattr(client, "_cleanup", lambda *_args, **_kwargs: None)
                 except Exception:
                     pass
             graph = db.select_graph("codecontext")

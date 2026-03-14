@@ -14,6 +14,16 @@ from .storage import StorageBackend
 from .web import create_app
 
 
+def _configure_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
 def _default_backend() -> str:
     return "sqlite" if sys.platform == "win32" else "falkordblite"
 
@@ -540,6 +550,8 @@ def _handle_ai_chat(chain: Chain) -> None:
 
 
 def run(argv: list[str] | None = None) -> int:
+    _configure_stdio()
+
     if argv is None:
         argv = sys.argv[1:]
 
