@@ -15,7 +15,7 @@ What it does:
 3. Executes CLI smoke checks.
 4. Runs targeted pytest suites (including web API tests that cover `/mcp` on the web app).
 5. Builds wheel artifacts, installs from wheel, and validates `codecontext -version`.
-6. Validates indexing and queries on repository and mixed-language sample project.
+6. Validates indexing and queries on repository and mixed-language sample project using CLI stats/query outputs (backend-agnostic; does not rely on `.codecontext.db` file presence).
 
 ### `release.yml`
 Trigger: manual dispatch with semantic version input.

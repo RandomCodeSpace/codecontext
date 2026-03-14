@@ -59,7 +59,6 @@ jobs:
         run: |
           rm -f .codecontext.db
           uv run python -m codecontext index .
-          test -f .codecontext.db
           uv run python -m codecontext stats
           uv run python -m codecontext query entity parse
 
@@ -94,6 +93,5 @@ jobs:
 
           cd mixed-project
           uv run python -m codecontext index .
-          test -f .codecontext.db
           uv run python -m codecontext stats
           uv run python -m codecontext query entity add
