@@ -15,6 +15,7 @@ uv run python -m codecontext mcp             # MCP stdio (CLI integration)
 ## Architecture
 - `src/codecontext/cli.py` command routing
 - `src/codecontext/db.py` SQLite-backed graph model and queries
+- `src/codecontext/db_cogdb.py` CogDB graph database backend (cross-platform)
 - `src/codecontext/parser.py` multi-language parser adapters
 - `src/codecontext/indexer.py` hash-based indexing pipeline
 - `src/codecontext/mcp.py` MCP tool API and stdio server

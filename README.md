@@ -110,8 +110,8 @@ codecontext web 8080
 ```
 
 Backend note:
-- Non-Windows default backend: `falkordblite`
-- Windows default backend: `sqlite` (the `falkordblite` dependency is not available on win32)
+- Default backend: `cogdb` (cross-platform, works on Windows, Linux, and macOS)
+- Alternative backend: `sqlite` (use `-backend sqlite` to switch)
 
 CI enforces this on both Linux and Windows via `.github/workflows/test-cli.yml`.
 

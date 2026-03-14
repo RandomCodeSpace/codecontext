@@ -25,7 +25,7 @@ def _configure_stdio() -> None:
 
 
 def _default_backend() -> str:
-    return "sqlite" if sys.platform == "win32" else "falkordblite"
+    return "cogdb"
 
 USAGE = """codecontext - aggregate source files and build code graphs with AI analysis
 
@@ -46,7 +46,7 @@ Commands:
 Flags:
     -ext string          Comma-separated file extensions to include (e.g. .go,.ts)
     -graph string        Path to graph database (default: .codecontext.db)
-    -backend string      Storage backend: sqlite or falkordblite (default: falkordblite on non-Windows, sqlite on Windows)
+    -backend string      Storage backend: sqlite or cogdb (default: cogdb)
     -verbose             Enable verbose logging
     -version             Print version and exit
     -help                Print this help message

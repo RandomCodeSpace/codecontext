@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -10,7 +9,7 @@ from codecontext.indexer import Indexer
 from codecontext.mcp import MCPService
 
 
-BACKENDS = ["sqlite"] if sys.platform == "win32" else ["sqlite", "falkordblite"]
+BACKENDS = ["sqlite", "cogdb"]
 
 
 def _build_service(tmp_path: Path, backend: str) -> tuple[MCPService, str, object]:

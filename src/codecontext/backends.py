@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-import sys
-
 from .db import Database
-from .db_falkordblite import FalkorLiteDatabase
+from .db_cogdb import CogDatabase
 from .storage import StorageBackend
 
-SUPPORTED_BACKENDS = {"sqlite", "falkordblite"}
+SUPPORTED_BACKENDS = {"sqlite", "cogdb"}
 
 
 def open_backend(name: str, graph_db: str, verbose: bool = False) -> StorageBackend:
     backend = normalize_backend_name(name)
     if backend == "sqlite":
         return Database.open(graph_db, verbose)
-    if backend == "falkordblite":
-        if sys.platform == "win32":
-            raise RuntimeError("falkordblite backend is not supported on Windows; use -backend sqlite")
-        return FalkorLiteDatabase.open(graph_db, verbose)
+    if backend == "cogdb":
+        return CogDatabase.open(graph_db, verbose)
     raise RuntimeError(f"unsupported backend: {name}")
 
 
