@@ -4,6 +4,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import hashlib
 import os
 import signal
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -67,15 +68,16 @@ class Indexer:
 
     def _log(self, message: str) -> None:
         if self.verbose:
-            print(self._format_log_line(message), file=os.sys.stderr)
+            print(self._format_log_line(message), file=sys.stderr)
 
     def _progress(self, message: str) -> None:
-        print(self._format_log_line(message), file=os.sys.stderr, flush=True)
+        print(self._format_log_line(message), file=sys.stderr, flush=True)
 
     def index_file(self, file_path: str) -> None:
-        probe = _probe_file_job(file_path)
+        normalized = Path(file_path).as_posix()
+        probe = _probe_file_job(normalized)
         prepared = _prepare_file_job(
-            file_path=file_path,
+            file_path=normalized,
             content_hash=str(probe["hash"]),
             lines_of_code=int(probe["lines_of_code"]),
             tokens=int(probe["tokens"]),
@@ -107,7 +109,7 @@ class Indexer:
         return self.db
 
     def _apply_prepared(self, prepared: dict[str, object]) -> dict[str, int | bool]:
-        path = Path(str(prepared["path"]))
+        path = Path(str(prepared["path"])).as_posix()
         content_hash = str(prepared["hash"])
         lines_of_code = int(prepared["lines_of_code"])
         tokens = int(prepared["tokens"])
@@ -452,16 +454,17 @@ class Indexer:
             existing_hash_by_path = {f.path: f.hash for f in self.db.get_files()}
             precheck_start = time.monotonic()
             for path in paths:
+                posix_path = path.as_posix()
                 try:
-                    probe = _probe_file_job(str(path))
+                    probe = _probe_file_job(posix_path)
                 except Exception as err:  # noqa: BLE001
                     self._progress(f"[index] failed during precheck at {path}: {err}")
                     raise
-                probes[str(path)] = probe
+                probes[posix_path] = probe
 
-                existing_hash = existing_hash_by_path.get(str(path), "")
+                existing_hash = existing_hash_by_path.get(posix_path, "")
                 if existing_hash and existing_hash == str(probe["hash"]):
-                    _record_skip({"skipped": True, "skip_reason": "unchanged_hash", "path": str(path)})
+                    _record_skip({"skipped": True, "skip_reason": "unchanged_hash", "path": posix_path})
                 else:
                     changed_paths.append(path)
 
@@ -484,10 +487,11 @@ class Indexer:
                 done = skipped
                 for path in changed_paths:
                     try:
-                        probe = probes[str(path)]
+                        posix_path = path.as_posix()
+                        probe = probes[posix_path]
                         t0 = time.monotonic()
                         prepared = _prepare_file_job(
-                            file_path=str(path),
+                            file_path=posix_path,
                             content_hash=str(probe["hash"]),
                             lines_of_code=int(probe["lines_of_code"]),
                             tokens=int(probe["tokens"]),
@@ -511,10 +515,11 @@ class Indexer:
                 done = skipped
                 with ProcessPoolExecutor(max_workers=self.parse_workers) as pool:
                     for path in changed_paths:
-                        probe = probes[str(path)]
+                        posix_path = path.as_posix()
+                        probe = probes[posix_path]
                         future = pool.submit(
                             _prepare_file_job,
-                            str(path),
+                            posix_path,
                             str(probe["hash"]),
                             int(probe["lines_of_code"]),
                             int(probe["tokens"]),
@@ -605,7 +610,7 @@ def _probe_file_job(file_path: str) -> dict[str, object]:
     content_hash = hashlib.md5(content.encode("utf-8", errors="replace")).hexdigest()
 
     return {
-        "path": str(path),
+        "path": path.as_posix(),
         "hash": content_hash,
         "lines_of_code": lines_of_code,
         "tokens": tokens,
@@ -615,7 +620,7 @@ def _probe_file_job(file_path: str) -> dict[str, object]:
 def _prepare_file_job(file_path: str, content_hash: str, lines_of_code: int, tokens: int) -> dict[str, object]:
     path = Path(file_path)
     content = path.read_text(encoding="utf-8", errors="replace")
-    parsed: ParseResult = parse(str(path), content)
+    parsed: ParseResult = parse(path.as_posix(), content)
 
     entities = [
         {
@@ -642,7 +647,7 @@ def _prepare_file_job(file_path: str, content_hash: str, lines_of_code: int, tok
     ]
 
     return {
-        "path": str(path),
+        "path": path.as_posix(),
         "hash": content_hash,
         "lines_of_code": lines_of_code,
         "tokens": tokens,
