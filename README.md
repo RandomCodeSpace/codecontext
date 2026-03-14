@@ -273,12 +273,57 @@ Found 2 entities:
   - ID: 1, Name: myFunction, Type: function, File: 3
   - ID: 5, Name: myFunction, Type: function, File: 7
 
+<<<<<<< Updated upstream
 $ codecontext stats
 Code Graph Statistics:
   Files:        42
   Entities:     156
   Dependencies: 89
   Relations:    234
+=======
+## Publish Public Package (PyPI)
+
+This repository publishes Python packages through GitHub Actions in two stages:
+- Primary path: `.github/workflows/release.yml` builds, uploads release artifacts, and publishes:
+	- prerelease versions to TestPyPI
+	- stable versions to PyPI
+- Fallback path: `.github/workflows/publish-pypi.yml` can publish an existing release tag (auto on release event or manually via workflow dispatch).
+
+### One-time setup
+
+1. Create project on PyPI:
+	- Create an account on PyPI.
+	- Create a project named `codecontext` (or rename `project.name` in `pyproject.toml` if the name is taken).
+
+2. (Optional but recommended) Create project on TestPyPI for dry-runs.
+
+3. Configure Trusted Publishing on PyPI and TestPyPI:
+	- Publisher type: GitHub
+	- Repository: your org/user + repo name
+	- Workflow: `publish-pypi.yml`
+	- Environment: leave empty unless you use one
+
+4. Ensure the package metadata in `pyproject.toml` is public-ready:
+	- `name`, `version`, `description`, `readme`, `requires-python`, `authors`
+	- add `license`, `classifiers`, `urls` if needed
+
+### Release flow
+
+1. Run the Release workflow manually with a version like `v1.2.3` or `v1.2.3-beta.1`.
+2. The workflow builds and attaches artifacts to the GitHub Release.
+3. Publishing workflow runs automatically:
+	- prerelease -> TestPyPI
+	- stable -> PyPI
+
+If release-event automation is not triggered in your repository settings, run `publish-pypi.yml` manually and provide the release tag.
+
+### Verify install
+
+Stable release:
+
+```bash
+pip install codecontext
+>>>>>>> Stashed changes
 ```
 
 ## Configuration

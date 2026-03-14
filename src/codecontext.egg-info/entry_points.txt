@@ -1,0 +1,2 @@
+[console_scripts]
+codecontext = codecontext.cli:run

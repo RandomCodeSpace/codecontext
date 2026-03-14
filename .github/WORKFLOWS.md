@@ -10,6 +10,7 @@ This project uses GitHub Actions for automated testing and validation.
 
 **Jobs**:
 
+<<<<<<< Updated upstream
 1. **test-cli**
    - Builds the codecontext binary
    - Tests on the codecontext repository itself
@@ -22,9 +23,23 @@ This project uses GitHub Actions for automated testing and validation.
    - Runs any available Go unit tests
    - Builds the binary
    - Validates binary size
+=======
+What it does:
+1. Validates version format.
+2. Syncs dependencies and runs the full test suite.
+3. Sets package version from the provided tag.
+4. Builds distribution artifacts.
+5. Creates and pushes tag.
+6. Creates GitHub release notes and uploads artifacts.
+7. Publishes prereleases to TestPyPI and stable releases to PyPI in the same workflow run.
+
+### `publish-pypi.yml`
+Trigger: GitHub Release published event, or manual `workflow_dispatch` with a tag.
+>>>>>>> Stashed changes
 
 ## Test Coverage
 
+<<<<<<< Updated upstream
 ### CLI Functions Tested
 
 - ✅ Build from source
@@ -83,6 +98,13 @@ This project uses GitHub Actions for automated testing and validation.
 ## Running Tests Locally
 
 ### Run all tests
+=======
+Note:
+- `release.yml` is the primary publish path.
+- `publish-pypi.yml` is a fallback/manual republish path for an existing release tag.
+
+## Local Equivalent Commands
+>>>>>>> Stashed changes
 ```bash
 go test ./...
 ```
