@@ -119,8 +119,7 @@ CI enforces this on both Linux and Windows via `.github/workflows/test-cli.yml`.
 
 This repository publishes Python packages through GitHub Actions with:
 - Primary path: `.github/workflows/release.yml` (builds, creates release, uploads artifacts, and publishes)
-	- prerelease versions publish to TestPyPI
-	- stable versions publish to PyPI
+	- all versions (stable and prerelease) publish to PyPI
 - Fallback path: `.github/workflows/publish-pypi.yml` (auto on release event or manual run by tag)
 
 ### One-time setup
@@ -129,15 +128,13 @@ This repository publishes Python packages through GitHub Actions with:
 	- Create an account on PyPI.
 	- Create a project named `randomcodespace-codecontext`.
 
-2. (Optional but recommended) Create project on TestPyPI for dry-runs.
-
-3. Configure Trusted Publishing on PyPI and TestPyPI:
+2. Configure Trusted Publishing on PyPI:
 	- Publisher type: GitHub
 	- Repository: your org/user + repo name
-	- Workflow: `publish-pypi.yml`
+	- Workflow: `release.yml`
 	- Environment: leave empty unless you use one
 
-4. Ensure the package metadata in `pyproject.toml` is public-ready:
+3. Ensure the package metadata in `pyproject.toml` is public-ready:
 	- `name`, `version`, `description`, `readme`, `requires-python`, `authors`
 	- add `license`, `classifiers`, `urls` if needed
 
@@ -151,25 +148,18 @@ Package naming note:
 1. Run the Release workflow manually with a version like `v1.2.3` or `v1.2.3-beta.1`.
 2. The workflow builds and attaches artifacts to the GitHub Release.
 3. Publishing occurs in the same release workflow run:
-	- prerelease -> TestPyPI
-	- stable -> PyPI
+	- stable and prerelease -> PyPI
 
 If release-event automation is blocked by repository token policy, run `publish-pypi.yml` manually and pass the release tag.
 
-If a release job is re-run for the same version, existing files on PyPI/TestPyPI are skipped. In normal use, publish a new version for each release.
+If a release job is re-run for the same version, existing files on PyPI are skipped. In normal use, publish a new version for each release.
 
 ### Verify install
 
-Stable release:
+Install from PyPI:
 
 ```bash
 pip install randomcodespace-codecontext
-```
-
-TestPyPI prerelease:
-
-```bash
-pip install -i https://test.pypi.org/simple/ randomcodespace-codecontext
 ```
 
 ## Notes

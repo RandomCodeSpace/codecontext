@@ -27,15 +27,15 @@ What it does:
 4. Builds distribution artifacts.
 5. Creates and pushes tag.
 6. Creates GitHub release notes and uploads artifacts.
-7. Publishes prereleases to TestPyPI and stable releases to PyPI in the same workflow run.
+7. Publishes all release versions (stable and prerelease) to PyPI in the same workflow run.
 
 ### `publish-pypi.yml`
 Trigger: GitHub Release published event, or manual `workflow_dispatch` with a tag.
 
 What it does:
 1. Downloads the wheel and sdist artifacts from the published release.
-2. Publishes prereleases to TestPyPI.
-3. Publishes stable releases to PyPI.
+2. Publishes the selected release artifacts to PyPI.
+3. Supports both stable and prerelease tags.
 4. Uses trusted publishing via OIDC (no API token required once PyPI is configured).
 
 Note:

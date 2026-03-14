@@ -95,17 +95,7 @@ jobs:
         run: |
           gh release upload "$VERSION" dist/* --clobber
 
-      - name: Publish prerelease to TestPyPI
-        if: ${{ contains(inputs.version, '-') }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
-          verbose: true
-
-      - name: Publish stable release to PyPI
-        if: ${{ !contains(inputs.version, '-') }}
+      - name: Publish release to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
