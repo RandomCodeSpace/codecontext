@@ -151,6 +151,8 @@ This repository publishes Python packages through GitHub Actions with:
 
 If release-event automation is blocked by repository token policy, run `publish-pypi.yml` manually and pass the release tag.
 
+If a release job is re-run for the same version, existing files on PyPI/TestPyPI are skipped. In normal use, publish a new version for each release.
+
 ### Verify install
 
 Stable release:

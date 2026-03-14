@@ -36,9 +36,11 @@ jobs:
         with:
           packages-dir: dist
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
       - name: Publish stable release to PyPI
         if: ${{ (github.event_name == 'release' && !github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && !contains(inputs.tag, '-')) }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+          skip-existing: true
