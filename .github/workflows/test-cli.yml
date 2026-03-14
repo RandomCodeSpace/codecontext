@@ -1,4 +1,4 @@
-name: Test CLI on Sample Projects
+name: Test CLI (Python)
 
 on:
   push:
@@ -12,366 +12,88 @@ on:
 
 jobs:
   test-cli:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout codecontext repo
         uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: codecontext
+          python-version: '3.12'
 
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.22'
+      - name: Sync dependencies
+        run: uv sync --all-extras
 
-      - name: Build codecontext
+      - name: Verify CLI entrypoint
         run: |
-          cd codecontext
-          go build -o codecontext
-          ./codecontext -version
-          echo "✓ Build successful"
+          uv run python -m codecontext -version
+          uv run python -m codecontext -help >/dev/null 2>&1
 
-      - name: Test CLI on codecontext repo
+      - name: Run unit tests
         run: |
-          cd codecontext
-          echo "=== Testing on codecontext repo ==="
+          uv run pytest -q tests/test_cli_smoke.py tests/test_indexer_basic.py tests/test_docs_command.py tests/test_mcp_tools.py tests/test_ai_commands.py tests/test_web_api.py
+
+      - name: Build and install wheel
+        run: |
+          uv build
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          codecontext -version
+
+      - name: Test CLI on repository
+        run: |
           rm -f .codecontext.db
+          uv run python -m codecontext index .
+          test -f .codecontext.db
+          uv run python -m codecontext stats
+          uv run python -m codecontext query entity parse
 
-          # Index the repo
-          ./codecontext index .
-          if [ ! -f .codecontext.db ]; then
-            echo "❌ Database not created"
-            exit 1
-          fi
-          echo "✓ Index successful"
-
-          # Get stats
-          echo ""
-          echo "=== Graph Statistics ==="
-          ./codecontext stats
-          echo ""
-
-          # Query entities
-          echo "=== Testing entity queries ==="
-          ./codecontext query entity Parse
-          echo ""
-
-      - name: Test CLI on Go project
+      - name: Test mixed-language indexing
         run: |
           cd /tmp
-          echo "=== Testing on golang/go samples ==="
+          mkdir -p mixed-project/go-code mixed-project/python-code mixed-project/js-code mixed-project/java-code
 
-          # Clone a sample Go project
-          git clone --depth=1 https://github.com/golang/example.git example-go
-          cd example-go
-
-          # Index the project
-          $GITHUB_WORKSPACE/codecontext/codecontext index .
-          if [ ! -f .codecontext.db ]; then
-            echo "❌ Database not created for Go project"
-            exit 1
-          fi
-          echo "✓ Go project indexed successfully"
-
-          # Get stats
-          echo ""
-          echo "=== Go Project Statistics ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext stats
-          echo ""
-
-      - name: Test CLI on mixed language project
-        run: |
-          cd /tmp
-          echo "=== Setting up mixed-language test project ==="
-
-          mkdir -p mixed-project/go-code
-          mkdir -p mixed-project/python-code
-          mkdir -p mixed-project/js-code
-
-          # Create a simple Go file
           cat > mixed-project/go-code/main.go << 'EOF'
           package main
-
           import "fmt"
-
-          func main() {
-              fmt.Println("Hello from Go")
-          }
-
-          func Add(a, b int) int {
-              return a + b
-          }
-
-          type Calculator struct {
-              name string
-          }
-
-          func (c *Calculator) Multiply(x, y int) int {
-              return x * y
-          }
+          func Add(a, b int) int { return a + b }
+          func main() { fmt.Println(Add(1,2)) }
           EOF
 
-          # Create a simple Python file
           cat > mixed-project/python-code/main.py << 'EOF'
-          def hello():
-              print("Hello from Python")
-
           class Calculator:
-              def __init__(self, name):
-                  self.name = name
-
               def add(self, a, b):
                   return a + b
-
-              def multiply(self, x, y):
-                  return x * y
           EOF
 
-          # Create a simple JavaScript file
           cat > mixed-project/js-code/main.js << 'EOF'
-          function hello() {
-              console.log("Hello from JavaScript");
+          function hello() { return 1; }
+          module.exports = { hello };
+          EOF
+
+          cat > mixed-project/java-code/Main.java << 'EOF'
+          public class Main {
+              public static int add(int a, int b) { return a + b; }
           }
-
-          class Calculator {
-              constructor(name) {
-                  this.name = name;
-              }
-
-              add(a, b) {
-                  return a + b;
-              }
-
-              multiply(x, y) {
-                  return x * y;
-              }
-          }
-
-          module.exports = { Calculator, hello };
           EOF
 
           cd mixed-project
-          echo "✓ Mixed project created"
-
-          # Index the mixed project
-          echo ""
-          echo "=== Indexing mixed-language project ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext index .
-
-          if [ ! -f .codecontext.db ]; then
-              echo "❌ Database not created for mixed project"
-              exit 1
-          fi
-          echo "✓ Mixed project indexed successfully"
-
-          # Get stats
-          echo ""
-          echo "=== Mixed Project Statistics ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext stats
-          echo ""
-
-          # Query entities from Go code
-          echo "=== Query: Add function ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext query entity Add
-          echo ""
-
-          echo "=== Query: Multiply method ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext query entity Multiply
-          echo ""
-
-      - name: Test CLI on Java project
-        run: |
-          cd /tmp
-          echo "=== Setting up Java test project ==="
-
-          mkdir -p java-project
-
-          # Create a Java Calculator class
-          cat > java-project/Calculator.java << 'EOF'
-          package com.example;
-
-          /**
-           * A simple calculator class demonstrating Java code parsing
-           */
-          public class Calculator {
-              private String name;
-
-              /**
-               * Constructor for Calculator
-               * @param name the name of the calculator
-               */
-              public Calculator(String name) {
-                  this.name = name;
-              }
-
-              /**
-               * Adds two numbers
-               * @param a first number
-               * @param b second number
-               * @return the sum
-               */
-              public int add(int a, int b) {
-                  return a + b;
-              }
-
-              /**
-               * Multiplies two numbers
-               * @param x first number
-               * @param y second number
-               * @return the product
-               */
-              public int multiply(int x, int y) {
-                  return x * y;
-              }
-
-              /**
-               * Divides two numbers
-               * @param dividend the number to divide
-               * @param divisor the number to divide by
-               * @return the quotient
-               */
-              public double divide(double dividend, double divisor) {
-                  if (divisor == 0) {
-                      throw new IllegalArgumentException("Divisor cannot be zero");
-                  }
-                  return dividend / divisor;
-              }
-
-              /**
-               * Gets the calculator name
-               * @return the name
-               */
-              public String getName() {
-                  return this.name;
-              }
-          }
-          EOF
-
-          # Create a Java interface
-          cat > java-project/Operation.java << 'EOF'
-          package com.example;
-
-          /**
-           * Interface for mathematical operations
-           */
-          public interface Operation {
-              /**
-               * Performs the operation
-               * @param a first operand
-               * @param b second operand
-               * @return the result
-               */
-              double execute(double a, double b);
-          }
-          EOF
-
-          # Create a Java enum
-          cat > java-project/MathOperation.java << 'EOF'
-          package com.example;
-
-          /**
-           * Enum for different math operations
-           */
-          public enum MathOperation {
-              ADD("+"),
-              SUBTRACT("-"),
-              MULTIPLY("*"),
-              DIVIDE("/");
-
-              private String symbol;
-
-              MathOperation(String symbol) {
-                  this.symbol = symbol;
-              }
-
-              public String getSymbol() {
-                  return symbol;
-              }
-          }
-          EOF
-
-          cd java-project
-          echo "✓ Java project created with 3 files"
-
-          # Index the Java project
-          echo ""
-          echo "=== Indexing Java project ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext index .
-
-          if [ ! -f .codecontext.db ]; then
-              echo "❌ Database not created for Java project"
-              exit 1
-          fi
-          echo "✓ Java project indexed successfully"
-
-          # Get stats
-          echo ""
-          echo "=== Java Project Statistics ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext stats
-          echo ""
-
-          # Query Java entities
-          echo "=== Query: Calculator class ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext query entity Calculator
-          echo ""
-
-          echo "=== Query: add method ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext query entity add
-          echo ""
-
-          echo "=== Query: Operation interface ==="
-          $GITHUB_WORKSPACE/codecontext/codecontext query entity Operation
-          echo ""
-
-      - name: Test legacy file aggregation
-        run: |
-          cd codecontext
-          echo "=== Testing legacy file aggregation ==="
-
-          # Test basic aggregation (should still work)
-          output=$(./codecontext -ext .go main.go)
-          if [[ $output == *"package main"* ]]; then
-              echo "✓ File aggregation working"
-          else
-              echo "❌ File aggregation failed"
-              exit 1
-          fi
-          echo ""
-
-      - name: Test version command
-        run: |
-          cd codecontext
-          echo "=== Testing version command ==="
-          ./codecontext -version
-          echo "✓ Version command working"
-
-  test-integration:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout codecontext repo
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.22'
-
-      - name: Run Go tests
-        run: |
-          go test ./... -v
-        continue-on-error: true  # Tests may not exist yet
-
-      - name: Build binary
-        run: go build -o codecontext
-
-      - name: Verify binary size
-        run: |
-          SIZE=$(stat -f%z codecontext 2>/dev/null || stat -c%s codecontext)
-          echo "Binary size: $SIZE bytes"
-          if [ $SIZE -gt 50000000 ]; then
-              echo "⚠️  Warning: Binary is larger than expected"
-          else
-              echo "✓ Binary size reasonable"
-          fi
+          uv run python -m codecontext index .
+          test -f .codecontext.db
+          uv run python -m codecontext stats
+          uv run python -m codecontext query entity add
