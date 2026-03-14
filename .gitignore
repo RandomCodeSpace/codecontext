@@ -2,6 +2,9 @@
 .env.local
 .codecontext*
 *.out
+pulsar-master/
+
+.idea/
 pulsar-master
 log
 .venv/
