@@ -41,13 +41,18 @@ header{
 .stat{display:flex;flex-direction:column;align-items:flex-end}
 .stat-val{font-size:14px;font-weight:600;color:var(--text);line-height:1}
 .stat-lbl{font-size:10px;color:var(--text3);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
-.lang-pills{display:flex;gap:6px;align-items:center;margin-left:8px;padding-left:14px;border-left:1px solid var(--border)}
+.lang-pills{display:flex;gap:5px;align-items:center;margin-left:8px;padding-left:14px;border-left:1px solid var(--border)}
+.lang-pills-label{font-size:9px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;margin-right:2px}
 .lang-pill{
-  padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;
-  cursor:pointer;border:1px solid transparent;opacity:.5;transition:opacity .15s,border-color .15s;
+  padding:3px 9px;border-radius:12px;font-size:10px;font-weight:700;
+  cursor:pointer;border:1.5px solid currentColor;user-select:none;
+  transition:opacity .15s,background .15s,border-style .15s,text-decoration .15s;
 }
-.lang-pill:hover{opacity:1}
-.lang-pill.active{opacity:1;border-color:currentColor}
+/* active = language IS visible — filled tinted background */
+.lang-pill.active{opacity:1;border-style:solid}
+/* hidden = language is filtered out — dim, dashed border, strikethrough */
+.lang-pill.hidden{opacity:.32;border-style:dashed;background:transparent!important;text-decoration:line-through}
+.lang-pill:hover{opacity:.8}
 
 /* ── Breadcrumb ── */
 #breadcrumb{
@@ -63,7 +68,7 @@ header{
 .crumb-cur{color:var(--text2)}
 
 /* ── Main layout ── */
-#layout{display:flex;height:calc(100vh - 80px);overflow:hidden}
+#layout{display:flex;height:calc(100vh - 104px);overflow:hidden;position:relative}
 
 /* ── Chart area ── */
 #chart-wrap{flex:1;position:relative;overflow:hidden;background:var(--bg);cursor:crosshair}
@@ -115,6 +120,71 @@ code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--ac
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+/* ── Search clear button ── */
+.search-clear{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:18px;height:18px;border-radius:50%;border:none;cursor:pointer;
+  background:var(--surface2);color:var(--text3);font-size:11px;line-height:18px;text-align:center;
+  display:none;transition:background .15s,color .15s;padding:0;
+}
+.search-clear:hover{background:var(--border);color:var(--text)}
+
+/* ── Help button ── */
+.help-btn{
+  width:26px;height:26px;border-radius:50%;border:1px solid var(--border);
+  background:transparent;color:var(--text3);font-size:12px;font-weight:700;
+  cursor:pointer;transition:border-color .15s,color .15s;flex-shrink:0;
+}
+.help-btn:hover{border-color:var(--accent);color:var(--accent2)}
+
+/* ── Help overlay ── */
+#help-overlay{
+  position:fixed;inset:0;z-index:100;display:none;
+  background:rgba(0,0,0,.7);backdrop-filter:blur(4px);
+  align-items:center;justify-content:center;
+}
+#help-overlay.visible{display:flex}
+#help-modal{
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:24px 28px;max-width:480px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.6);
+}
+.help-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between}
+.help-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;padding:2px 6px}
+.help-close:hover{color:var(--text)}
+.help-section{margin-bottom:14px}
+.help-section-title{font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.help-row{display:flex;align-items:center;gap:10px;padding:3px 0;font-size:11px;color:var(--text2)}
+.help-key{
+  display:inline-block;min-width:22px;padding:2px 6px;text-align:center;
+  background:var(--surface2);border:1px solid var(--border);border-radius:4px;
+  font-size:10px;font-weight:600;color:var(--text);font-family:inherit;
+}
+.help-swatch{width:12px;height:12px;border-radius:3px;flex-shrink:0;border:1px solid rgba(255,255,255,.1)}
+
+/* ── Panel toggle ── */
+.panel-toggle{
+  position:absolute;top:50%;right:300px;transform:translateY(-50%);z-index:8;
+  width:16px;height:40px;border-radius:4px 0 0 4px;cursor:pointer;
+  background:var(--surface2);border:1px solid var(--border);border-right:none;
+  color:var(--text3);display:flex;align-items:center;justify-content:center;
+  font-size:10px;transition:color .15s,background .15s;
+}
+.panel-toggle:hover{background:var(--border);color:var(--text)}
+#panel.collapsed{width:0;flex:0 0 0;overflow:hidden;border-left:none}
+#layout.panel-collapsed .panel-toggle{right:0;border-radius:4px}
+
+/* ── Status bar (keyboard hints) ── */
+#status-bar{
+  height:24px;display:flex;align-items:center;gap:14px;padding:0 18px;
+  background:var(--surface);border-top:1px solid var(--border);
+  font-size:10px;color:var(--text3);
+}
+.status-item{display:flex;align-items:center;gap:4px}
+.status-key{
+  padding:0 4px;background:var(--surface2);border:1px solid var(--border);
+  border-radius:3px;font-size:9px;font-weight:600;color:var(--text2);
+}
 </style>
 </head>
 <body>
@@ -135,9 +205,12 @@ code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--ac
       <path d="M11 11l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
     </svg>
     <input id="search" placeholder="Search paths, files&#x2026;" autocomplete="off" spellcheck="false">
+    <button class="search-clear" id="search-clear" title="Clear search">&times;</button>
   </div>
 
   <div class="lang-pills" id="lang-pills"></div>
+
+  <button class="help-btn" id="help-btn" title="Keyboard shortcuts &amp; legend (H)">?</button>
 
   <div class="stats">
     <div class="stat"><span class="stat-val" id="s-files">&#x2014;</span><span class="stat-lbl">Files</span></div>
@@ -161,6 +234,8 @@ code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--ac
     </div>
   </div>
 
+  <div class="panel-toggle" id="panel-toggle" title="Toggle panel (P)">&#x25B6;</div>
+
   <div id="panel">
     <div id="panel-header" style="display:none">
       <div class="panel-title" id="panel-title"></div>
@@ -176,6 +251,45 @@ code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--ac
         <p>Click any segment to explore<br>dependencies &amp; entities.</p>
       </div>
       <div id="panel-content" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<div id="status-bar">
+  <span class="status-item"><span class="status-key">Click</span> select</span>
+  <span class="status-item"><span class="status-key">Click&#xD7;2</span> zoom in</span>
+  <span class="status-item"><span class="status-key">Esc</span> zoom out</span>
+  <span class="status-item"><span class="status-key">/</span> search</span>
+  <span class="status-item"><span class="status-key">P</span> panel</span>
+  <span class="status-item"><span class="status-key">H</span> help</span>
+</div>
+
+<div id="help-overlay">
+  <div id="help-modal">
+    <div class="help-title">
+      Keyboard Shortcuts &amp; Legend
+      <button class="help-close" id="help-close">&times;</button>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">Navigation</div>
+      <div class="help-row"><span class="help-key">Click</span> Select a segment &amp; show details</div>
+      <div class="help-row"><span class="help-key">Click again</span> Zoom into selected directory</div>
+      <div class="help-row"><span class="help-key">Esc</span> Zoom out one level (or deselect)</div>
+      <div class="help-row"><span class="help-key">Backspace</span> Zoom out one level</div>
+      <div class="help-row"><span class="help-key">/</span> Focus search box</div>
+      <div class="help-row"><span class="help-key">P</span> Toggle detail panel</div>
+      <div class="help-row"><span class="help-key">H</span> Toggle this help overlay</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">Chart Colors</div>
+      <div class="help-row"><span class="help-swatch" style="background:#f97316"></span> <b>Bright</b> = source file (colored by language)</div>
+      <div class="help-row"><span class="help-swatch" style="background:#4b2308"></span> <b>Dark / muted</b> = directory (tinted by dominant language)</div>
+      <div class="help-row"><span class="help-swatch" style="background:#4338ca"></span> <b>Indigo</b> = currently selected</div>
+      <div class="help-row"><span class="help-swatch" style="background:#f59e0b"></span> <b>Amber</b> = search match</div>
+    </div>
+    <div class="help-section">
+      <div class="help-section-title">Language Colors</div>
+      <div id="help-langs"></div>
     </div>
   </div>
 </div>
@@ -203,10 +317,22 @@ const emptyHint=document.getElementById('empty-hint');
 
 function fmt(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n)}
 
+// Blend a hex color toward black by a factor (0=black, 1=full color).
+function dimColor(hex,factor){
+  factor=factor||0.3;
+  var n=parseInt(hex.replace('#',''),16);
+  var r=Math.round(((n>>16)&255)*factor);
+  var g=Math.round(((n>>8)&255)*factor);
+  var b=Math.round((n&255)*factor);
+  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+}
+
 function nodeColor(node){
-  if(node.lang&&LANG_COLOR[node.lang])return LANG_COLOR[node.lang];
-  if(node.lang)return LANG_COLOR._default;
-  return LANG_COLOR._dir;
+  var base=(node.lang&&LANG_COLOR[node.lang])?LANG_COLOR[node.lang]:LANG_COLOR._default;
+  // Files: bright saturated language color
+  if(isFile(node))return base;
+  // Directories: dark muted tint of dominant language
+  return dimColor(base,0.3);
 }
 
 function lighten(hex,amt){
@@ -271,9 +397,29 @@ function draw(){
   }
 }
 
+// A leaf node is a file (no children); directories always have children.
+function isFile(n){return !n.children||!n.children.length;}
+
+// Returns true if this node (or any descendant) has visible (non-hidden) files.
+function nodeHasVisible(node){
+  if(isFile(node))return !node.lang||!langFilter.has(node.lang);
+  for(var i=0;i<node.children.length;i++)if(nodeHasVisible(node.children[i]))return true;
+  return false;
+}
+
+// Returns the count of only visible files in a subtree (for width proportioning).
+function visibleCount(node){
+  if(isFile(node))return (node.lang&&langFilter.has(node.lang))?0:node.count;
+  var s=0;for(var i=0;i<node.children.length;i++)s+=visibleCount(node.children[i]);
+  return s;
+}
+
 function drawNode(node,depth,x,w,rowH,offsetDepth){
   if(w<1)return;
-  if(node.lang&&langFilter.size>0&&!langFilter.has(node.lang))return;
+  // Skip file nodes whose language is hidden
+  if(isFile(node)&&node.lang&&langFilter.has(node.lang))return;
+  // Skip directory nodes whose entire subtree is hidden
+  if(!isFile(node)&&langFilter.size>0&&!nodeHasVisible(node))return;
   var y=(depth-offsetDepth)*rowH;
   if(y>canvas.height/dpr)return;
   var h=rowH-GAP;
@@ -287,32 +433,36 @@ function drawNode(node,depth,x,w,rowH,offsetDepth){
   ctx.fillStyle=color;
   ctx.fillRect(x,y,w-GAP,h);
   ctx.shadowBlur=0;ctx.shadowColor='transparent';
-  // Left accent stripe for directories
-  if(!node.lang&&node.children&&node.children.length){
-    ctx.fillStyle=lighten(color,50);
+  // Left accent stripe for directories — use bright language color
+  if(!isFile(node)){
+    var accent=(node.lang&&LANG_COLOR[node.lang])?LANG_COLOR[node.lang]:LANG_COLOR._default;
+    ctx.fillStyle=accent;
     ctx.fillRect(x,y,2,h);
   }
-  // Label
+  // Label — show visible count when filtering, full count otherwise
   if(w>36){
     var fs=Math.max(9,Math.min(12,rowH-6));
     ctx.font=fs+'px \'SF Mono\',ui-monospace,monospace';
     ctx.fillStyle='rgba(255,255,255,.85)';
     ctx.save();
     ctx.beginPath();ctx.rect(x+4,y+1,w-10,h-2);ctx.clip();
-    var label=node.name+(node.children&&w>90?'  '+fmt(node.count):'');
+    var dispCount=!isFile(node)&&langFilter.size>0?visibleCount(node):node.count;
+    var label=node.name+(!isFile(node)&&w>90?'  '+fmt(dispCount):'');
     ctx.fillText(label,x+6,y+h/2+fs*0.36);
     ctx.restore();
   }
   layoutCache.push({node:node,x:x,y:y,w:w-GAP,h:h});
-  // Children
+  // Children — filter recursively and re-proportion widths by visible count
   if(node.children&&node.children.length){
-    var visible=node.children;
-    if(langFilter.size>0)visible=node.children.filter(function(c){return !c.lang||langFilter.has(c.lang);});
-    var total=0;for(var i=0;i<visible.length;i++)total+=visible[i].count;
+    var visible=langFilter.size>0
+      ?node.children.filter(nodeHasVisible)
+      :node.children;
+    var total=0;for(var i=0;i<visible.length;i++)total+=langFilter.size>0?visibleCount(visible[i]):visible[i].count;
     if(total===0)total=1;
     var cx=x;
     for(var i=0;i<visible.length;i++){
-      var cw=Math.floor((visible[i].count/total)*w);
+      var vc=langFilter.size>0?visibleCount(visible[i]):visible[i].count;
+      var cw=Math.floor((vc/total)*w);
       drawNode(visible[i],depth+1,cx,cw,rowH,offsetDepth);
       cx+=cw;
     }
@@ -351,10 +501,17 @@ function updateBreadcrumb(){
 
 function showTooltip(node,px,py){
   tooltip.style.display='block';
+  var isDir=!isFile(node);
+  var typeLabel=isDir?'<span style="color:var(--text3)">directory</span>':'<span style="color:var(--text3)">file</span>';
+  var hint='';
+  if(node===selectedNode&&isDir)hint='<div style="color:var(--accent);font-size:10px;margin-top:3px">Click to zoom in</div>';
+  else if(node!==selectedNode)hint='<div style="color:var(--text3);font-size:10px;margin-top:3px">Click to select</div>';
   tooltip.innerHTML='<div class="tooltip-name">'+esc(node.name)+'</div>'
     +'<div class="tooltip-sub">'
+    +typeLabel+' &middot; '
     +(node.lang?'<b>'+node.lang+'</b> &middot; ':'')+fmt(node.count)+' file'+(node.count!==1?'s':'')
-    +(node.path?' &middot; '+esc(node.path):'')+'</div>';
+    +(node.path?' &middot; '+esc(node.path):'')+'</div>'
+    +hint;
   var wrap=document.getElementById('chart-wrap');
   var W=wrap.clientWidth,H=wrap.clientHeight;
   var tx=px+14,ty=py+14;
@@ -379,22 +536,81 @@ function zoomTo(path){
 }
 window.zoomTo=zoomTo;
 
+function hexAlpha(hex,a){
+  var r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return 'rgba('+r+','+g+','+b+','+a+')';
+}
+
 function buildLangPills(){
   if(!treeRoot)return;
-  var langs=Array.from(collectLangs(treeRoot));
+  var langs=Array.from(collectLangs(treeRoot)).sort();
   var container=document.getElementById('lang-pills');
   container.innerHTML='';
+  if(!langs.length)return;
+
+  // Label
+  var lbl=document.createElement('span');
+  lbl.className='lang-pills-label';lbl.textContent='langs:';
+  container.appendChild(lbl);
+
+  var pillEls={};
+
   langs.forEach(function(lang){
     var c=LANG_COLOR[lang]||LANG_COLOR._default;
     var pill=document.createElement('div');
-    pill.className='lang-pill active';pill.style.color=c;pill.textContent=lang;
+    pill.className='lang-pill active';
+    pill.style.color=c;
+    pill.style.borderColor=c;
+    pill.style.background=hexAlpha(c,0.18);
+    pill.textContent=lang;
+    pill.title='Click to hide '+lang+' files';
+    pillEls[lang]=pill;
+
     pill.onclick=function(){
-      if(langFilter.has(lang)){langFilter.delete(lang);pill.classList.add('active');}
-      else{langFilter.add(lang);pill.classList.remove('active');}
+      if(langFilter.has(lang)){
+        // un-hide: remove from exclusion set → active
+        langFilter.delete(lang);
+        pill.classList.remove('hidden');pill.classList.add('active');
+        pill.style.background=hexAlpha(c,0.18);
+        pill.title='Click to hide '+lang+' files';
+      } else {
+        // hide: add to exclusion set → hidden
+        langFilter.add(lang);
+        pill.classList.remove('active');pill.classList.add('hidden');
+        pill.style.background='transparent';
+        pill.title='Click to show '+lang+' files';
+      }
       draw();
+      updateResetBtn();
     };
     container.appendChild(pill);
   });
+
+  // Reset button — only visible when a filter is active
+  var reset=document.createElement('div');
+  reset.id='lang-reset';
+  reset.style.cssText='display:none;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:600;cursor:pointer;border:1px solid var(--border);color:var(--text3);margin-left:2px;transition:color .15s';
+  reset.textContent='reset';
+  reset.title='Show all languages';
+  reset.onmouseenter=function(){reset.style.color='var(--accent2)';};
+  reset.onmouseleave=function(){reset.style.color='var(--text3)';};
+  reset.onclick=function(){
+    langFilter.clear();
+    langs.forEach(function(lang){
+      var c=LANG_COLOR[lang]||LANG_COLOR._default;
+      var p=pillEls[lang];
+      p.classList.remove('hidden');p.classList.add('active');
+      p.style.background=hexAlpha(c,0.18);
+      p.title='Click to hide '+lang+' files';
+    });
+    draw();updateResetBtn();
+  };
+  container.appendChild(reset);
+
+  function updateResetBtn(){
+    reset.style.display=langFilter.size>0?'block':'none';
+  }
+  updateResetBtn();
 }
 
 function showPanelLoading(node){
@@ -468,8 +684,89 @@ canvas.addEventListener('click',function(e){
   }
 });
 
-document.getElementById('search').addEventListener('input',function(e){
-  searchText=e.target.value.trim();draw();
+// ── Search with clear button ──
+var searchInput=document.getElementById('search');
+var searchClear=document.getElementById('search-clear');
+searchInput.addEventListener('input',function(e){
+  searchText=e.target.value.trim();
+  searchClear.style.display=searchText?'block':'none';
+  draw();
+});
+searchClear.addEventListener('click',function(){
+  searchInput.value='';searchText='';searchClear.style.display='none';
+  searchInput.focus();draw();
+});
+
+// ── Panel toggle ──
+var panelEl=document.getElementById('panel');
+var layoutEl=document.getElementById('layout');
+var panelToggle=document.getElementById('panel-toggle');
+function togglePanel(){
+  var collapsed=panelEl.classList.toggle('collapsed');
+  layoutEl.classList.toggle('panel-collapsed',collapsed);
+  panelToggle.innerHTML=collapsed?'&#x25C0;':'&#x25B6;';
+  panelToggle.title=collapsed?'Show panel (P)':'Hide panel (P)';
+  setTimeout(resizeCanvas,50);
+}
+panelToggle.addEventListener('click',togglePanel);
+
+// ── Help overlay ──
+var helpOverlay=document.getElementById('help-overlay');
+function toggleHelp(){helpOverlay.classList.toggle('visible');}
+document.getElementById('help-btn').addEventListener('click',toggleHelp);
+document.getElementById('help-close').addEventListener('click',toggleHelp);
+helpOverlay.addEventListener('click',function(e){if(e.target===helpOverlay)toggleHelp();});
+// Populate language colors in help
+(function(){
+  var el=document.getElementById('help-langs');
+  var langs={java:'#f97316',go:'#00ADD8',python:'#3b82f6',javascript:'#f59e0b',typescript:'#60a5fa'};
+  var html='';
+  for(var l in langs)html+='<div class="help-row"><span class="help-swatch" style="background:'+langs[l]+'"></span> '+l+'</div>';
+  el.innerHTML=html;
+})();
+
+// ── Keyboard shortcuts ──
+document.addEventListener('keydown',function(e){
+  // Ignore when typing in search
+  if(e.target===searchInput&&e.key!=='Escape')return;
+
+  switch(e.key){
+    case 'Escape':
+      // If help is open, close it first
+      if(helpOverlay.classList.contains('visible')){toggleHelp();return;}
+      // If search is active, clear it
+      if(searchText){searchInput.value='';searchText='';searchClear.style.display='none';draw();return;}
+      // Zoom out one level
+      if(zoomedPath){
+        var parts=zoomedPath.split('/');parts.pop();
+        zoomedPath=parts.join('/');
+        selectedNode=findNode(treeRoot,zoomedPath)||null;
+        draw();updateBreadcrumb();
+        if(zoomedPath)fetchDirDetail(zoomedPath);
+        return;
+      }
+      // Deselect
+      if(selectedNode){selectedNode=null;draw();panelHeader.style.display='none';panelHint.style.display='flex';panelContent.style.display='none';}
+      break;
+    case 'Backspace':
+      if(e.target.tagName==='INPUT')return;
+      if(zoomedPath){
+        var parts=zoomedPath.split('/');parts.pop();
+        zoomedPath=parts.join('/');
+        draw();updateBreadcrumb();
+      }
+      break;
+    case '/':
+      if(e.target.tagName==='INPUT')return;
+      e.preventDefault();searchInput.focus();
+      break;
+    case 'p': case 'P':
+      if(e.target.tagName==='INPUT')return;
+      togglePanel();break;
+    case 'h': case 'H': case '?':
+      if(e.target.tagName==='INPUT')return;
+      toggleHelp();break;
+  }
 });
 
 async function fetchTree(){
