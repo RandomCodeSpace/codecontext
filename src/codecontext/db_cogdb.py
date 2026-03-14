@@ -316,6 +316,50 @@ class CogDatabase:
             attributes=data.get("attributes", ""),
         )
 
+    def batch_insert_entities(
+        self,
+        file_id: int,
+        rows: list[dict[str, Any]],
+    ) -> list[int]:
+        """Insert multiple entities for a file. Returns assigned IDs."""
+        ids: list[int] = []
+        for r in rows:
+            eid = self.insert_entity(
+                file_id=file_id,
+                name=r["name"],
+                entity_type=r["entity_type"],
+                kind=r.get("kind", ""),
+                signature=r.get("signature", ""),
+                start_line=r.get("start_line", 0),
+                end_line=r.get("end_line", 0),
+                docs=r.get("docs", ""),
+                parent=r.get("parent", ""),
+                visibility=r.get("visibility", ""),
+                scope=r.get("scope", ""),
+                language=r.get("language", ""),
+            )
+            ids.append(eid)
+        return ids
+
+    def batch_insert_dependencies(
+        self,
+        file_id: int,
+        rows: list[dict[str, Any]],
+    ) -> int:
+        """Insert multiple dependencies. Returns count."""
+        for r in rows:
+            self.insert_dependency(file_id, r["path"], r["type"], r.get("line_number", 0))
+        return len(rows)
+
+    def batch_insert_relations(
+        self,
+        rows: list[tuple[int, int, str, int, str]],
+    ) -> int:
+        """Insert multiple entity relations. Returns count."""
+        for src, tgt, rel_type, line, ctx in rows:
+            self.insert_entity_relation(src, tgt, rel_type, line, ctx)
+        return len(rows)
+
     # ── Dependency operations ───────────────────────────────────────
 
     def insert_dependency(self, source_file_id: int, target_path: str, dep_type: str, line_number: int) -> int:
