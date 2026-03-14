@@ -1,53 +1,44 @@
-# GitHub Copilot Instructions — codecontext
+# GitHub Copilot Instructions — codecontext (Python)
 
 ## Project Overview
-codecontext is a Go CLI tool that indexes source code into a SQLite-backed code graph and exposes it via MCP (Model Context Protocol), a web UI, and AI-powered analysis. It parses Go, Python, JavaScript/TypeScript, and Java using tree-sitter.
+codecontext is a Python CLI that indexes source code into a SQLite-backed graph and exposes it via MCP, a web API/UI, and AI analysis commands.
 
 ## Build & Test Commands
 ```bash
-go build -o codecontext          # Build
-go test ./...                    # Run all tests
-go test ./pkg/parser/ -v         # Test parsers specifically
-go vet ./...                     # Lint
+uv sync --all-extras
+uv run pytest -q
+uv run python -m codecontext -version
+uv run python -m codecontext index .
+uv run python -m codecontext stats
 ```
 
 ## Code Conventions
-- **Go 1.24+**, stdlib `testing` only
-- Error wrapping: `fmt.Errorf("context: %w", err)`
-- Logging: `log/slog` JSON handler to stderr for MCP server; `fmt.Printf` for CLI output
-- Commit messages: `type(scope): message` (e.g., `fix(mcp): handle nil pointer`)
-- Keep it simple — no over-engineering, no unnecessary abstractions
+- Python 3.12+
+- Prefer simple modules and explicit data models (`dataclasses`)
+- Keep error messages actionable and user-facing CLI output concise
+- Maintain CLI compatibility for existing flags/commands
+- Keep it simple, avoid unnecessary abstractions
 
 ## Architecture Summary
-| Package | Role |
+| Path | Role |
 |---|---|
-| `main.go` | CLI entry point |
-| `pkg/db` | GORM + SQLite (models + operations) |
-| `pkg/parser` | Language router + per-language sub-packages |
-| `pkg/parser/go` | Go parser (stdlib `go/ast`) |
-| `pkg/parser/{python,javascript,java}` | Tree-sitter based parsers |
-| `pkg/indexer` | Parallel file indexer, mutex-serialized writes |
-| `pkg/mcp` | MCP server (official Go SDK, stdio + HTTP) |
-| `pkg/web` | Self-contained SPA embedded in Go |
-| `pkg/llm` | LLM provider abstraction |
-| `pkg/ai` | AI analysis chains |
+| `src/codecontext/cli.py` | CLI entry point and command routing |
+| `src/codecontext/db.py` | SQLite schema + graph queries |
+| `src/codecontext/parser.py` | Multi-language parsing + dependency extraction |
+| `src/codecontext/indexer.py` | File indexing, hashing, graph population |
+| `src/codecontext/mcp.py` | MCP-compatible tools + stdio server |
+| `src/codecontext/llm.py` | LLM provider abstraction |
+| `src/codecontext/ai.py` | AI chains and chat workflows |
+| `src/codecontext/web.py` | FastAPI web routes (`/api/*`) + MCP HTTP (`/mcp`) |
 
 ## Key Dependencies
-- `github.com/smacker/go-tree-sitter` — tree-sitter bindings for Python/JS/Java
-- `github.com/modelcontextprotocol/go-sdk/mcp` — official MCP Go SDK
-- `gorm.io/gorm` + `gorm.io/driver/sqlite` — ORM + database
-- `github.com/sashabaranov/go-openai` — OpenAI client
-
-## Important Patterns
-- Tree-sitter parsers create `sitter.NewParser()`, set language, call `parser.ParseCtx()`, walk AST
-- MCP tools use `mcpsdk.AddTool()` with typed structs (`json`/`jsonschema` tags)
-- DB uses `FirstOrCreate` to prevent duplicates, `WithTx()` for transactions
-- Indexer detects changes via MD5 hash, respects `.gitignore`
+- `fastapi`, `uvicorn`
+- `httpx`
+- `openai`
+- `tree-sitter`
+- `pytest`
 
 ## Testing Requirements
-- Always run `go test ./pkg/parser/ -v` after parser changes
-- Always run `go test ./...` after any package change
-- CI: `.github/workflows/test-cli.yml` — builds and indexes sample projects
-
-## For Detailed Instructions
-See `CLAUDE.md` in the project root for comprehensive task guides (adding parsers, MCP tools, DB schema changes, web UI modifications).
+- Run `uv run pytest -q` after code changes.
+- For command-specific edits, run focused tests in `tests/`.
+- CI: `.github/workflows/test-cli.yml` validates CLI on sample projects.

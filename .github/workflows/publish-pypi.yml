@@ -1,0 +1,38 @@
+name: Publish Python Package
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish from release artifacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir -p dist
+          gh release download "$TAG_NAME" --pattern "*.whl" --pattern "*.tar.gz" --dir dist
+          ls -lh dist
+
+      - name: Publish prerelease to TestPyPI
+        if: ${{ github.event.release.prerelease }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish stable release to PyPI
+        if: ${{ !github.event.release.prerelease }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

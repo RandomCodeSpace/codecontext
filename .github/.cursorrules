@@ -1,0 +1,22 @@
+# Cursor AI Rules — codecontext (Python)
+
+## Build/Test
+- `uv sync --all-extras`
+- `uv run pytest -q`
+- `uv run python -m codecontext -version`
+
+## Architecture
+- `src/codecontext/cli.py` — command router
+- `src/codecontext/db.py` — SQLite graph persistence
+- `src/codecontext/parser.py` — parsing/detection
+- `src/codecontext/indexer.py` — indexing pipeline
+- `src/codecontext/mcp.py` — MCP tools and servers
+- `src/codecontext/llm.py` — provider abstraction
+- `src/codecontext/ai.py` — AI chains
+- `src/codecontext/web.py` — FastAPI routes
+
+## Coding Standards
+- Python 3.12+
+- Keep CLI/MCP contracts backward compatible
+- Prefer straightforward code and explicit errors
+- Add/adjust tests in `tests/` for behavior changes
