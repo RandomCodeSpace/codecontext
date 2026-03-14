@@ -48,7 +48,7 @@ class Indexer:
             return "🧪"
         if "rate=" in text or "eta=" in text:
             return "📊"
-        if "starting stage->falkordblite sync" in text:
+        if "starting stage->destination sync" in text:
             return "🚚"
         if "phase complete" in text:
             return "✅"
@@ -88,7 +88,7 @@ class Indexer:
                 self._close_stage_db()
 
     def _use_staging(self) -> bool:
-        return self.backend == "falkordblite"
+        return False
 
     def _get_stage_db(self) -> Database:
         if self._stage_db is None:
@@ -202,7 +202,7 @@ class Indexer:
         if not staged_files:
             return
 
-        self._progress(f"[sync] starting stage->falkordblite sync for {len(staged_files)} files")
+        self._progress(f"[sync] starting stage->destination sync for {len(staged_files)} files")
         abort_requested = False
         prev_handler: object | None = None
 

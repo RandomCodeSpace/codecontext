@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -11,7 +10,7 @@ from codecontext.indexer import Indexer
 from codecontext.web import create_app
 
 
-BACKENDS = ["sqlite"] if sys.platform == "win32" else ["sqlite", "falkordblite"]
+BACKENDS = ["sqlite", "cogdb"]
 
 
 def _make_app(tmp_path: Path, backend: str) -> tuple[TestClient, object]:

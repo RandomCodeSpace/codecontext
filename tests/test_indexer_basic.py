@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-
-import pytest
 
 from codecontext.backends import open_backend
 from codecontext.cli import run
@@ -17,7 +14,7 @@ def test_index_and_query_flow(tmp_path: Path, capsys):
         encoding="utf-8",
     )
 
-    db_path = tmp_path / "graph.falkor.db"
+    db_path = tmp_path / "graph.cog.db"
 
     code = run(["-graph", str(db_path), "index", str(project)])
     assert code == 0
@@ -44,28 +41,24 @@ def test_index_and_query_flow(tmp_path: Path, capsys):
     assert "Entities:" in out
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="falkordblite is not supported on Windows")
-def test_falkordblite_backend_index_and_stats(tmp_path: Path, capsys):
+def test_cogdb_backend_index_and_stats(tmp_path: Path, capsys):
     project = tmp_path / "proj"
     project.mkdir()
     (project / "sample.py").write_text("def top():\n    return 1\n", encoding="utf-8")
 
-    db_path = tmp_path / "graph.falkor.db"
+    db_path = tmp_path / "graph.cog.db"
 
-    code = run(["-backend", "falkordblite", "-graph", str(db_path), "index", str(project)])
+    code = run(["-backend", "cogdb", "-graph", str(db_path), "index", str(project)])
     assert code == 0
-    err = capsys.readouterr().err
-    assert "[sync] starting stage->falkordblite sync" in err
 
-    code = run(["-backend", "falkordblite", "-graph", str(db_path), "stats"])
+    code = run(["-backend", "cogdb", "-graph", str(db_path), "stats"])
     assert code == 0
     out = capsys.readouterr().out
     assert "Files:" in out
     assert "Entities:" in out
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="falkordblite is not supported on Windows")
-def test_falkordblite_staged_sync_parity_with_sqlite(tmp_path: Path):
+def test_cogdb_parity_with_sqlite(tmp_path: Path):
     project = tmp_path / "proj"
     project.mkdir()
     (project / "a.py").write_text(
@@ -77,25 +70,25 @@ def test_falkordblite_staged_sync_parity_with_sqlite(tmp_path: Path):
         encoding="utf-8",
     )
 
-    falkor_path = tmp_path / "graph.falkor.db"
+    cog_path = tmp_path / "graph.cog.db"
     sqlite_path = tmp_path / "graph.sqlite.db"
 
-    assert run(["-backend", "falkordblite", "-graph", str(falkor_path), "index", str(project)]) == 0
+    assert run(["-backend", "cogdb", "-graph", str(cog_path), "index", str(project)]) == 0
     assert run(["-backend", "sqlite", "-graph", str(sqlite_path), "index", str(project)]) == 0
 
-    falkor_db = open_backend("falkordblite", str(falkor_path))
+    cog_db = open_backend("cogdb", str(cog_path))
     sqlite_db = open_backend("sqlite", str(sqlite_path))
     try:
-        assert falkor_db.get_file_count() == sqlite_db.get_file_count()
-        assert falkor_db.get_entity_count() == sqlite_db.get_entity_count()
-        assert falkor_db.get_dependency_count() == sqlite_db.get_dependency_count()
-        assert falkor_db.get_relation_count() == sqlite_db.get_relation_count()
+        assert cog_db.get_file_count() == sqlite_db.get_file_count()
+        assert cog_db.get_entity_count() == sqlite_db.get_entity_count()
+        assert cog_db.get_dependency_count() == sqlite_db.get_dependency_count()
+        assert cog_db.get_relation_count() == sqlite_db.get_relation_count()
 
-        falkor_names = sorted(entity.name for entity in falkor_db.get_all_entities())
+        cog_names = sorted(entity.name for entity in cog_db.get_all_entities())
         sqlite_names = sorted(entity.name for entity in sqlite_db.get_all_entities())
-        assert falkor_names == sqlite_names
+        assert cog_names == sqlite_names
     finally:
-        falkor_db.close()
+        cog_db.close()
         sqlite_db.close()
 
 
