@@ -13,6 +13,10 @@ from .mcp import run_http, run_stdio
 from .storage import StorageBackend
 from .web import create_app
 
+
+def _default_backend() -> str:
+    return "sqlite" if sys.platform == "win32" else "falkordblite"
+
 USAGE = """codecontext - aggregate source files and build code graphs with AI analysis
 
 Usage:
@@ -32,7 +36,7 @@ Commands:
 Flags:
     -ext string          Comma-separated file extensions to include (e.g. .go,.ts)
     -graph string        Path to graph database (default: .codecontext.db)
-    -backend string      Storage backend: sqlite or falkordblite (default: falkordblite)
+    -backend string      Storage backend: sqlite or falkordblite (default: falkordblite on non-Windows, sqlite on Windows)
     -verbose             Enable verbose logging
     -version             Print version and exit
     -help                Print this help message
@@ -542,7 +546,7 @@ def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("-ext", default="")
     parser.add_argument("-graph", default=".codecontext.db")
-    parser.add_argument("-backend", default="falkordblite")
+    parser.add_argument("-backend", default=_default_backend())
     parser.add_argument("-version", action="store_true")
     parser.add_argument("-verbose", action="store_true")
     parser.add_argument("-help", action="store_true")

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+import pytest
 
 from codecontext.backends import open_backend
 from codecontext.cli import run
@@ -41,6 +44,7 @@ def test_index_and_query_flow(tmp_path: Path, capsys):
     assert "Entities:" in out
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="falkordblite is not supported on Windows")
 def test_falkordblite_backend_index_and_stats(tmp_path: Path, capsys):
     project = tmp_path / "proj"
     project.mkdir()
@@ -60,6 +64,7 @@ def test_falkordblite_backend_index_and_stats(tmp_path: Path, capsys):
     assert "Entities:" in out
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="falkordblite is not supported on Windows")
 def test_falkordblite_staged_sync_parity_with_sqlite(tmp_path: Path):
     project = tmp_path / "proj"
     project.mkdir()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,9 @@ from fastapi.testclient import TestClient
 from codecontext.backends import open_backend
 from codecontext.indexer import Indexer
 from codecontext.web import create_app
+
+
+BACKENDS = ["sqlite"] if sys.platform == "win32" else ["sqlite", "falkordblite"]
 
 
 def _make_app(tmp_path: Path, backend: str) -> tuple[TestClient, object]:
@@ -27,7 +31,7 @@ def _make_app(tmp_path: Path, backend: str) -> tuple[TestClient, object]:
     return client, db
 
 
-@pytest.mark.parametrize("backend", ["sqlite", "falkordblite"])
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_web_endpoints(tmp_path: Path, backend: str):
     client, db = _make_app(tmp_path, backend)
     try:
@@ -65,7 +69,7 @@ def test_web_endpoints(tmp_path: Path, backend: str):
     finally:
         db.close()
 
-@pytest.mark.parametrize("backend", ["sqlite", "falkordblite"])
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_tree_directory_has_dominant_language(tmp_path: Path, backend: str):
     project = tmp_path / "proj"
     py_dir = project / "py"

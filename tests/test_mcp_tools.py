@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,9 @@ import pytest
 from codecontext.backends import open_backend
 from codecontext.indexer import Indexer
 from codecontext.mcp import MCPService
+
+
+BACKENDS = ["sqlite"] if sys.platform == "win32" else ["sqlite", "falkordblite"]
 
 
 def _build_service(tmp_path: Path, backend: str) -> tuple[MCPService, str, object]:
@@ -25,7 +29,7 @@ def _build_service(tmp_path: Path, backend: str) -> tuple[MCPService, str, objec
     return MCPService(db, idx), str(file_path), db
 
 
-@pytest.mark.parametrize("backend", ["sqlite", "falkordblite"])
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_graph_stats_and_list_files(tmp_path: Path, backend: str):
     service, file_path, db = _build_service(tmp_path, backend)
     try:
@@ -39,7 +43,7 @@ def test_graph_stats_and_list_files(tmp_path: Path, backend: str):
     finally:
         db.close()
 
-@pytest.mark.parametrize("backend", ["sqlite", "falkordblite"])
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_search_query_outline_imports_and_code(tmp_path: Path, backend: str):
     service, file_path, db = _build_service(tmp_path, backend)
     try:
@@ -62,7 +66,7 @@ def test_search_query_outline_imports_and_code(tmp_path: Path, backend: str):
     finally:
         db.close()
 
-@pytest.mark.parametrize("backend", ["sqlite", "falkordblite"])
+@pytest.mark.parametrize("backend", BACKENDS)
 def test_find_usages_returns_shape(tmp_path: Path, backend: str):
     service, _file_path, db = _build_service(tmp_path, backend)
     try:
