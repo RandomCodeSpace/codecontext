@@ -50,3 +50,10 @@ uv run python -m codecontext -version
 uv run python -m codecontext index .
 uv run python -m codecontext stats
 ```
+
+PyPI distribution name:
+- `randomcodespace-codecontext`
+
+Runtime names remain:
+- CLI command: `codecontext`
+- Python package import: `codecontext`

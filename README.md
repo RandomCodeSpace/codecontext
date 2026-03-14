@@ -127,7 +127,7 @@ This repository publishes Python packages through GitHub Actions with:
 
 1. Create project on PyPI:
 	- Create an account on PyPI.
-	- Create a project named `codecontext` (or rename `project.name` in `pyproject.toml` if the name is taken).
+	- Create a project named `randomcodespace-codecontext`.
 
 2. (Optional but recommended) Create project on TestPyPI for dry-runs.
 
@@ -140,6 +140,11 @@ This repository publishes Python packages through GitHub Actions with:
 4. Ensure the package metadata in `pyproject.toml` is public-ready:
 	- `name`, `version`, `description`, `readme`, `requires-python`, `authors`
 	- add `license`, `classifiers`, `urls` if needed
+
+Package naming note:
+- PyPI distribution name: `randomcodespace-codecontext`
+- CLI command: `codecontext`
+- Python import package: `codecontext`
 
 ### Release flow
 
@@ -158,13 +163,13 @@ If a release job is re-run for the same version, existing files on PyPI/TestPyPI
 Stable release:
 
 ```bash
-pip install codecontext
+pip install randomcodespace-codecontext
 ```
 
 TestPyPI prerelease:
 
 ```bash
-pip install -i https://test.pypi.org/simple/ codecontext
+pip install -i https://test.pypi.org/simple/ randomcodespace-codecontext
 ```
 
 ## Notes
