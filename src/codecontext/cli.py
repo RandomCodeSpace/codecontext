@@ -1,7 +1,12 @@
 import argparse
+import io
 import json
 import os
+import shutil
 import sys
+import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from .ai import Chain, ConversationContext, ConversationMessage
@@ -47,6 +52,7 @@ Flags:
     -ext string          Comma-separated file extensions to include (e.g. .go,.ts)
     -graph string        Path to graph database (default: .codecontext.db)
     -backend string      Storage backend: sqlite or cogdb (default: cogdb)
+    -from-url string     Download a zip from URL containing a .db baseline
     -verbose             Enable verbose logging
     -version             Print version and exit
     -help                Print this help message
@@ -370,7 +376,7 @@ def handle_stats(graph_db: str, backend: str, verbose: bool) -> int:
     finally:
         database.close()
 
-    _print_stats_summary(stats)
+    _print_stats_summary(stats, graph_db)
     return 0
 
 
@@ -394,6 +400,7 @@ def handle_web(graph_db: str, backend: str, args: list[str], verbose: bool) -> i
     host = "127.0.0.1"
     print(f"Starting graph UI at http://localhost:{port}")
     print(f"MCP HTTP endpoint available at http://localhost:{port}/mcp")
+    print(f"Database: {graph_db}")
     print("Press Ctrl+C to stop")
     try:
         uvicorn.run(app, host=host, port=int(port), log_level="info")
@@ -549,6 +556,32 @@ def _handle_ai_chat(chain: Chain) -> None:
             print(chain.chat(conversation, raw))
 
 
+def _download_db_from_url(url: str, dest: Path) -> None:
+    """Download a zip from *url*, extract the first .db file, and copy it to *dest*."""
+    print(f"Downloading baseline database from {url} ...")
+    try:
+        with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310
+            data = resp.read()
+    except Exception as err:
+        raise RuntimeError(f"failed to download {url}: {err}") from err
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as err:
+        raise RuntimeError(f"downloaded file is not a valid zip archive: {err}") from err
+
+    db_names = [n for n in zf.namelist() if n.endswith(".db")]
+    if not db_names:
+        raise RuntimeError("no .db file found inside the zip archive")
+
+    db_name = db_names[0]
+    print(f"Extracting {db_name} -> {dest}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    with zf.open(db_name) as src, open(dest, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+
+
 def run(argv: list[str] | None = None) -> int:
     _configure_stdio()
 
@@ -559,6 +592,7 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("-ext", default="")
     parser.add_argument("-graph", default=".codecontext.db")
     parser.add_argument("-backend", default=_default_backend())
+    parser.add_argument("-from-url", default="", dest="from_url")
     parser.add_argument("-version", action="store_true")
     parser.add_argument("-verbose", action="store_true")
     parser.add_argument("-help", action="store_true")
@@ -573,6 +607,22 @@ def run(argv: list[str] | None = None) -> int:
         print(f"codecontext {__version__}")
         return 0
 
+    # Resolve the graph database path to an absolute path so logs always
+    # show the exact location on disk regardless of the working directory.
+    graph_db = str(Path(parsed.graph).resolve())
+
+    # Download a baseline .db from a zip URL if requested.
+    if parsed.from_url:
+        dest = Path(graph_db)
+        if dest.exists():
+            print(f"Database already exists at {graph_db}; skipping download", file=sys.stderr)
+        else:
+            try:
+                _download_db_from_url(parsed.from_url, dest)
+            except RuntimeError as err:
+                print(f"error: {err}", file=sys.stderr)
+                return 1
+
     if not remaining:
         return legacy_aggregate(".", parsed.ext)
 
@@ -580,19 +630,19 @@ def run(argv: list[str] | None = None) -> int:
     cmd_args = remaining[1:]
 
     if command == "index":
-        return handle_index(parsed.graph, parsed.backend, cmd_args, parsed.verbose)
+        return handle_index(graph_db, parsed.backend, cmd_args, parsed.verbose)
     if command == "query":
-        return handle_query(parsed.graph, parsed.backend, cmd_args, parsed.verbose)
+        return handle_query(graph_db, parsed.backend, cmd_args, parsed.verbose)
     if command == "ai":
-        return handle_ai(parsed.graph, parsed.backend, cmd_args, parsed.verbose)
+        return handle_ai(graph_db, parsed.backend, cmd_args, parsed.verbose)
     if command == "docs":
-        return handle_docs(parsed.graph, parsed.backend, cmd_args, parsed.verbose)
+        return handle_docs(graph_db, parsed.backend, cmd_args, parsed.verbose)
     if command == "stats":
-        return handle_stats(parsed.graph, parsed.backend, parsed.verbose)
+        return handle_stats(graph_db, parsed.backend, parsed.verbose)
     if command == "web":
-        return handle_web(parsed.graph, parsed.backend, cmd_args, parsed.verbose)
+        return handle_web(graph_db, parsed.backend, cmd_args, parsed.verbose)
     if command == "mcp":
-        return handle_mcp(parsed.graph, parsed.backend, cmd_args, parsed.verbose)
+        return handle_mcp(graph_db, parsed.backend, cmd_args, parsed.verbose)
 
     exit_code = legacy_aggregate(command, parsed.ext)
     for arg in cmd_args:
