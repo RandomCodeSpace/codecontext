@@ -4,6 +4,12 @@ on:
   release:
     types:
       - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v1.2.3 or v1.2.3-beta.1)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,21 +24,21 @@ jobs:
       - name: Download release artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ github.event.release.tag_name }}
+          TAG_NAME: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           mkdir -p dist
           gh release download "$TAG_NAME" --pattern "*.whl" --pattern "*.tar.gz" --dir dist
           ls -lh dist
 
       - name: Publish prerelease to TestPyPI
-        if: ${{ github.event.release.prerelease }}
+        if: ${{ (github.event_name == 'release' && github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && contains(inputs.tag, '-')) }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
           repository-url: https://test.pypi.org/legacy/
 
       - name: Publish stable release to PyPI
-        if: ${{ !github.event.release.prerelease }}
+        if: ${{ (github.event_name == 'release' && !github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && !contains(inputs.tag, '-')) }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist

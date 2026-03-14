@@ -117,11 +117,11 @@ CI enforces this on both Linux and Windows via `.github/workflows/test-cli.yml`.
 
 ## Publish Public Package (PyPI)
 
-This repository publishes Python packages through GitHub Actions in two stages:
-- Create a release with `.github/workflows/release.yml` (builds and uploads wheel/sdist assets to GitHub Release).
-- Auto-publish with `.github/workflows/publish-pypi.yml`:
-  - prerelease tags publish to TestPyPI
-  - stable tags publish to PyPI
+This repository publishes Python packages through GitHub Actions with:
+- Primary path: `.github/workflows/release.yml` (builds, creates release, uploads artifacts, and publishes)
+	- prerelease versions publish to TestPyPI
+	- stable versions publish to PyPI
+- Fallback path: `.github/workflows/publish-pypi.yml` (auto on release event or manual run by tag)
 
 ### One-time setup
 
@@ -145,9 +145,11 @@ This repository publishes Python packages through GitHub Actions in two stages:
 
 1. Run the Release workflow manually with a version like `v1.2.3` or `v1.2.3-beta.1`.
 2. The workflow builds and attaches artifacts to the GitHub Release.
-3. Publishing workflow runs automatically:
+3. Publishing occurs in the same release workflow run:
 	- prerelease -> TestPyPI
 	- stable -> PyPI
+
+If release-event automation is blocked by repository token policy, run `publish-pypi.yml` manually and pass the release tag.
 
 ### Verify install
 
