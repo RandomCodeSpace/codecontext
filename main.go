@@ -38,6 +38,7 @@ Commands:
   ai                   Analyze code with AI
   docs                 Generate documentation for the whole project
   stats                Show graph statistics
+  clean                Delete the index database and start fresh
   web                  Start web UI to visualise the code graph
   serve                Start web UI + MCP HTTP server on the same port
   mcp                  Start MCP server (for Claude integration)
@@ -80,6 +81,8 @@ Examples:
   codecontext docs -ai                       # AI-generated docs (default style)
   codecontext docs -ai -prompt "Use JSDoc"   # AI docs with custom style
   codecontext stats                          # show graph statistics
+  codecontext clean                          # delete index and start fresh
+  codecontext clean -graph custom.db         # delete a specific database
   codecontext web                            # open graph visualisation at http://localhost:8080
   codecontext serve                          # web UI + MCP HTTP on :8080
   codecontext serve -addr :9000              # web UI + MCP HTTP on :9000
@@ -125,6 +128,8 @@ func main() {
 		handleDocs(graphDB, cmdArgs, *verbose)
 	case "stats":
 		handleStats(graphDB, *verbose)
+	case "clean":
+		handleClean(graphDB)
 	case "web":
 		handleWeb(graphDB, cmdArgs, *verbose)
 	case "serve":
@@ -462,6 +467,49 @@ func handleStats(graphDB *string, verbose bool) {
 	fmt.Printf("   🧩 Entities:     %v\n", stats["entities"])
 	fmt.Printf("   📦 Dependencies: %v\n", stats["dependencies"])
 	fmt.Printf("   🔗 Relations:    %v\n", stats["relations"])
+}
+
+// --------------------------------------------------------------------------
+// clean command — delete the index database
+// --------------------------------------------------------------------------
+
+func handleClean(graphDB *string) {
+	dbPath := *graphDB
+	info, err := os.Stat(dbPath)
+	if os.IsNotExist(err) {
+		fmt.Printf("ℹ️  No database found at %s — nothing to clean.\n", dbPath)
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ error checking database: %v\n", err)
+		os.Exit(1)
+	}
+
+	size := info.Size()
+	if err := os.Remove(dbPath); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ error deleting database: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Also remove WAL and SHM files if they exist (SQLite journal files)
+	os.Remove(dbPath + "-wal")
+	os.Remove(dbPath + "-shm")
+
+	fmt.Printf("🧹 Deleted index database: %s (%s)\n", dbPath, formatBytes(size))
+	fmt.Println("   Run `codecontext index .` to rebuild.")
+}
+
+func formatBytes(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(b)/float64(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(b)/float64(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(b)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }
 
 // --------------------------------------------------------------------------

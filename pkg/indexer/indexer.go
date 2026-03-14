@@ -41,6 +41,15 @@ func (idx *Indexer) log(format string, args ...interface{}) {
 	}
 }
 
+// indexOp describes what IndexFile did with a file.
+type indexOp int
+
+const (
+	opAdded   indexOp = iota // new file indexed for the first time
+	opUpdated                // existing file re-indexed (content changed)
+	opSkipped                // file unchanged, nothing to do
+)
+
 // IndexFile parses a single file and upserts all its entities, dependencies,
 // and entity relations into the database.
 //
@@ -49,13 +58,14 @@ func (idx *Indexer) log(format string, args ...interface{}) {
 // deleted before re-inserting so the graph stays consistent.
 //
 // This method is safe to call from multiple goroutines concurrently.
-func (idx *Indexer) IndexFile(filePath string) error {
+// It returns the operation performed so callers can track add/update/skip counts.
+func (idx *Indexer) IndexFile(filePath string) (indexOp, error) {
 	idx.log("  📄 Indexing %s", filePath)
 
 	idx.log("    📖 Reading & Hashing...")
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+		return opSkipped, fmt.Errorf("failed to read file: %w", err)
 	}
 
 	linesOfCode := strings.Count(string(content), "\n")
@@ -72,24 +82,26 @@ func (idx *Indexer) IndexFile(filePath string) error {
 	existingFile, err := idx.db.GetFileByPath(filePath)
 	idx.mu.Unlock()
 	if err != nil {
-		return fmt.Errorf("failed to check existing file: %w", err)
+		return opSkipped, fmt.Errorf("failed to check existing file: %w", err)
 	}
 
+	op := opAdded
 	if existingFile != nil {
 		if existingFile.Hash == hash {
 			idx.log("    ⏭️  Unchanged — skipping")
-			return nil
+			return opSkipped, nil
 		}
+		op = opUpdated
 		idx.log("    🔄 File changed — clearing old data")
 		idx.mu.Lock()
 		delEntErr := idx.db.DeleteEntitiesByFile(existingFile.ID)
 		delDepErr := idx.db.DeleteDependenciesByFile(existingFile.ID)
 		idx.mu.Unlock()
 		if delEntErr != nil {
-			return fmt.Errorf("failed to delete old entities: %w", delEntErr)
+			return opSkipped, fmt.Errorf("failed to delete old entities: %w", delEntErr)
 		}
 		if delDepErr != nil {
-			return fmt.Errorf("failed to delete old dependencies: %w", delDepErr)
+			return opSkipped, fmt.Errorf("failed to delete old dependencies: %w", delDepErr)
 		}
 	}
 
@@ -97,7 +109,7 @@ func (idx *Indexer) IndexFile(filePath string) error {
 	idx.log("    ⚙️  Extracting entities & dependencies...")
 	parseResult, err := parser.Parse(filePath, string(content))
 	if err != nil {
-		return fmt.Errorf("failed to parse file: %w", err)
+		return opSkipped, fmt.Errorf("failed to parse file: %w", err)
 	}
 
 	idx.log("    🔍 Parsed: %d entities, %d imports (lang=%s)",
@@ -183,7 +195,10 @@ func (idx *Indexer) IndexFile(filePath string) error {
 		return nil
 	})
 
-	return txErr
+	if txErr != nil {
+		return opSkipped, txErr
+	}
+	return op, nil
 }
 
 // ignoreEntry pairs a base directory with the compiled patterns from the
@@ -301,9 +316,12 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 	close(pathCh)
 
 	var (
-		processed atomic.Int64
-		errCount  atomic.Int64
-		wg        sync.WaitGroup
+		processed  atomic.Int64
+		errCount   atomic.Int64
+		addedCount atomic.Int64
+		updCount   atomic.Int64
+		skipCount  atomic.Int64
+		wg         sync.WaitGroup
 	)
 
 	for i := 0; i < workers(); i++ {
@@ -311,9 +329,19 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 		go func() {
 			defer wg.Done()
 			for p := range pathCh {
-				if err := idx.IndexFile(p); err != nil {
+				op, err := idx.IndexFile(p)
+				if err != nil {
 					fmt.Fprintf(os.Stderr, "  ❌ Error indexing %s: %v\n", p, err)
 					errCount.Add(1)
+				} else {
+					switch op {
+					case opAdded:
+						addedCount.Add(1)
+					case opUpdated:
+						updCount.Add(1)
+					case opSkipped:
+						skipCount.Add(1)
+					}
 				}
 				n := processed.Add(1)
 				// Print a compact progress line every 10 files (or on first/last).
@@ -325,7 +353,18 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 	}
 
 	wg.Wait()
-	fmt.Printf("\n  📊 Indexed %d/%d files, %d errors\n", processed.Load()-errCount.Load(), total, errCount.Load())
+	added := addedCount.Load()
+	updated := updCount.Load()
+	skipped := skipCount.Load()
+	errs := errCount.Load()
+	fmt.Println()
+	fmt.Printf("  📊 Indexing complete: %d files processed\n", total)
+	fmt.Printf("     ✅ Added:   %d\n", added)
+	fmt.Printf("     🔄 Updated: %d\n", updated)
+	fmt.Printf("     ⏭️  Skipped: %d (unchanged)\n", skipped)
+	if errs > 0 {
+		fmt.Printf("     ❌ Errors:  %d\n", errs)
+	}
 	return nil
 }
 
