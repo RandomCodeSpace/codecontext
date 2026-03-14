@@ -57,6 +57,11 @@ class EntityRelation:
     context: str
 
 
+def _posix(path: str) -> str:
+    """Normalize a file path to forward slashes for consistent storage/lookup."""
+    return path.replace("\\", "/")
+
+
 class Database:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -144,13 +149,13 @@ class Database:
         self.conn.commit()
 
     def insert_file(self, path: str, language: str, file_hash: str, lines_of_code: int, tokens: int) -> int:
-        row = self.conn.execute("SELECT id FROM files WHERE path = ?", (path,)).fetchone()
+        normalized = _posix(path)
+        row = self.conn.execute("SELECT id FROM files WHERE path = ?", (normalized,)).fetchone()
         if row is None:
             cur = self.conn.execute(
                 "INSERT INTO files(path, language, hash, lines_of_code, tokens) VALUES (?, ?, ?, ?, ?)",
-                (path, language, file_hash, lines_of_code, tokens),
+                (normalized, language, file_hash, lines_of_code, tokens),
             )
-            self.conn.commit()
             return int(cur.lastrowid)
 
         file_id = int(row["id"])
@@ -158,13 +163,12 @@ class Database:
             "UPDATE files SET language = ?, hash = ?, lines_of_code = ?, tokens = ? WHERE id = ?",
             (language, file_hash, lines_of_code, tokens, file_id),
         )
-        self.conn.commit()
         return file_id
 
     def get_file_by_path(self, path: str) -> File | None:
         row = self.conn.execute(
             "SELECT id, path, language, hash, lines_of_code, tokens FROM files WHERE path = ?",
-            (path,),
+            (_posix(path),),
         ).fetchone()
         if row is None:
             return None
@@ -277,11 +281,9 @@ class Database:
 
     def delete_entities_by_file(self, file_id: int) -> None:
         self.conn.execute("DELETE FROM entities WHERE file_id = ?", (file_id,))
-        self.conn.commit()
 
     def delete_dependencies_by_file(self, file_id: int) -> None:
         self.conn.execute("DELETE FROM dependencies WHERE source_file_id = ?", (file_id,))
-        self.conn.commit()
 
     def insert_dependency(self, source_file_id: int, target_path: str, dep_type: str, line_number: int) -> int:
         row = self.conn.execute(
@@ -382,7 +384,7 @@ class Database:
         return [self._row_to_entity(row) for row in rows]
 
     def get_file_imports(self, path: str) -> list[str]:
-        file = self.get_file_by_path(path)
+        file = self.get_file_by_path(_posix(path))
         if file is None:
             return []
         rows = self.conn.execute(
@@ -411,7 +413,8 @@ class Database:
         }
 
     def get_dependency_graph(self, file_path: str) -> dict[str, Any]:
-        file = self.get_file_by_path(file_path)
+        normalized = _posix(file_path)
+        file = self.get_file_by_path(normalized)
         if file is None:
             raise ValueError(f"file not found: {file_path}")
         deps = self.get_dependencies(file.id)
@@ -440,6 +443,80 @@ class Database:
     def get_relation_count(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) AS c FROM entity_relations").fetchone()
         return int(row["c"])
+
+    def batch_insert_entities(
+        self,
+        file_id: int,
+        rows: list[dict[str, Any]],
+    ) -> list[int]:
+        """Insert multiple entities for a file using executemany. Skips
+        duplicate checks — caller must ensure the file's entities have
+        already been deleted.  Returns the list of assigned IDs."""
+        if not rows:
+            return []
+        params = [
+            (
+                file_id,
+                r["name"],
+                r["entity_type"],
+                r.get("kind", ""),
+                r.get("signature", ""),
+                r.get("start_line", 0),
+                r.get("end_line", 0),
+                r.get("docs", ""),
+                r.get("parent", ""),
+                r.get("visibility", ""),
+                r.get("scope", ""),
+                r.get("language", ""),
+            )
+            for r in rows
+        ]
+        self.conn.executemany(
+            """INSERT INTO entities(file_id, name, type, kind, signature,
+               start_line, end_line, documentation, parent, visibility,
+               scope, language)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            params,
+        )
+        # Fetch back the IDs for the rows we just inserted (ordered by rowid).
+        id_rows = self.conn.execute(
+            "SELECT id FROM entities WHERE file_id = ? ORDER BY id",
+            (file_id,),
+        ).fetchall()
+        return [int(r["id"]) for r in id_rows[-len(rows):]]
+
+    def batch_insert_dependencies(
+        self,
+        file_id: int,
+        rows: list[dict[str, Any]],
+    ) -> int:
+        """Insert multiple dependencies using executemany. Returns count."""
+        if not rows:
+            return 0
+        params = [
+            (file_id, r["path"], r["type"], r.get("line_number", 0))
+            for r in rows
+        ]
+        self.conn.executemany(
+            "INSERT INTO dependencies(source_file_id, target_path, import_type, line_number) VALUES (?, ?, ?, ?)",
+            params,
+        )
+        return len(rows)
+
+    def batch_insert_relations(
+        self,
+        rows: list[tuple[int, int, str, int, str]],
+    ) -> int:
+        """Insert multiple entity relations using executemany. Returns count."""
+        if not rows:
+            return 0
+        self.conn.executemany(
+            """INSERT INTO entity_relations(source_entity_id, target_entity_id,
+               relation_type, line_number, context)
+               VALUES (?, ?, ?, ?, ?)""",
+            rows,
+        )
+        return len(rows)
 
     def commit(self) -> None:
         self.conn.commit()

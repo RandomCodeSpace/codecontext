@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .db import Dependency, Entity, EntityRelation, File
+from .db import Dependency, Entity, EntityRelation, File, _posix
 
 
 class CogDatabase:
@@ -117,7 +117,8 @@ class CogDatabase:
     # ── File operations ─────────────────────────────────────────────
 
     def insert_file(self, path: str, language: str, file_hash: str, lines_of_code: int, tokens: int) -> int:
-        existing = self._find_file_node(path)
+        normalized = _posix(path)
+        existing = self._find_file_node(normalized)
         if existing is not None:
             node_id, data = existing
             data.update(language=language, hash=file_hash, lines_of_code=lines_of_code, tokens=tokens)
@@ -129,19 +130,19 @@ class CogDatabase:
         node_id = f"file:{file_id}"
         data = {
             "id": file_id,
-            "path": path,
+            "path": normalized,
             "language": language,
             "hash": file_hash,
             "lines_of_code": lines_of_code,
             "tokens": tokens,
         }
         self._put_data(node_id, data)
-        self._add_ref(f"_idx:fp:{path}", node_id)
+        self._add_ref(f"_idx:fp:{normalized}", node_id)
         self._add_ref("_all:files", node_id)
         return file_id
 
     def _find_file_node(self, path: str) -> tuple[str, dict[str, Any]] | None:
-        refs = self._get_refs(f"_idx:fp:{path}")
+        refs = self._get_refs(f"_idx:fp:{_posix(path)}")
         if not refs:
             return None
         node_id = refs[0]
@@ -315,6 +316,50 @@ class CogDatabase:
             language=data.get("language", ""),
             attributes=data.get("attributes", ""),
         )
+
+    def batch_insert_entities(
+        self,
+        file_id: int,
+        rows: list[dict[str, Any]],
+    ) -> list[int]:
+        """Insert multiple entities for a file. Returns assigned IDs."""
+        ids: list[int] = []
+        for r in rows:
+            eid = self.insert_entity(
+                file_id=file_id,
+                name=r["name"],
+                entity_type=r["entity_type"],
+                kind=r.get("kind", ""),
+                signature=r.get("signature", ""),
+                start_line=r.get("start_line", 0),
+                end_line=r.get("end_line", 0),
+                docs=r.get("docs", ""),
+                parent=r.get("parent", ""),
+                visibility=r.get("visibility", ""),
+                scope=r.get("scope", ""),
+                language=r.get("language", ""),
+            )
+            ids.append(eid)
+        return ids
+
+    def batch_insert_dependencies(
+        self,
+        file_id: int,
+        rows: list[dict[str, Any]],
+    ) -> int:
+        """Insert multiple dependencies. Returns count."""
+        for r in rows:
+            self.insert_dependency(file_id, r["path"], r["type"], r.get("line_number", 0))
+        return len(rows)
+
+    def batch_insert_relations(
+        self,
+        rows: list[tuple[int, int, str, int, str]],
+    ) -> int:
+        """Insert multiple entity relations. Returns count."""
+        for src, tgt, rel_type, line, ctx in rows:
+            self.insert_entity_relation(src, tgt, rel_type, line, ctx)
+        return len(rows)
 
     # ── Dependency operations ───────────────────────────────────────
 

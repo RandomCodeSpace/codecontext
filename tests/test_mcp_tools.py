@@ -25,7 +25,7 @@ def _build_service(tmp_path: Path, backend: str) -> tuple[MCPService, str, objec
     db = open_backend(backend, str(db_path))
     idx = Indexer(db)
     idx.index_directory(str(project))
-    return MCPService(db, idx), str(file_path), db
+    return MCPService(db, idx), file_path.as_posix(), db
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

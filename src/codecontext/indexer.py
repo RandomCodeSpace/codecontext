@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import hashlib
 import os
 import signal
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -67,15 +68,16 @@ class Indexer:
 
     def _log(self, message: str) -> None:
         if self.verbose:
-            print(self._format_log_line(message), file=os.sys.stderr)
+            print(self._format_log_line(message), file=sys.stderr)
 
     def _progress(self, message: str) -> None:
-        print(self._format_log_line(message), file=os.sys.stderr, flush=True)
+        print(self._format_log_line(message), file=sys.stderr, flush=True)
 
     def index_file(self, file_path: str) -> None:
-        probe = _probe_file_job(file_path)
+        normalized = Path(file_path).as_posix()
+        probe = _probe_file_job(normalized)
         prepared = _prepare_file_job(
-            file_path=file_path,
+            file_path=normalized,
             content_hash=str(probe["hash"]),
             lines_of_code=int(probe["lines_of_code"]),
             tokens=int(probe["tokens"]),
@@ -107,7 +109,7 @@ class Indexer:
         return self.db
 
     def _apply_prepared(self, prepared: dict[str, object]) -> dict[str, int | bool]:
-        path = Path(str(prepared["path"]))
+        path = Path(str(prepared["path"])).as_posix()
         content_hash = str(prepared["hash"])
         lines_of_code = int(prepared["lines_of_code"])
         tokens = int(prepared["tokens"])
@@ -115,82 +117,95 @@ class Indexer:
         entities = list(prepared["entities"])
         dependencies = list(prepared["dependencies"])
 
-        existing = self.db.get_file_by_path(str(path))
+        existing = self.db.get_file_by_path(path)
         if existing is not None and existing.hash == content_hash:
             self._log(f"skip unchanged: {path}")
             return {
                 "skipped": True,
                 "skip_reason": "unchanged_hash",
-                "path": str(path),
+                "path": path,
                 "entities": 0,
                 "dependencies": 0,
                 "relations": 0,
             }
 
         write_db = self._write_db()
-        existing_write = write_db.get_file_by_path(str(path))
+        existing_write = write_db.get_file_by_path(path)
         if existing_write is not None:
             write_db.delete_entities_by_file(existing_write.id)
             write_db.delete_dependencies_by_file(existing_write.id)
 
-        file_id = write_db.insert_file(str(path), language, content_hash, lines_of_code, tokens)
+        file_id = write_db.insert_file(path, language, content_hash, lines_of_code, tokens)
 
+        # -- Batch insert entities ----------------------------------------
+        entity_rows = [
+            {
+                "name": str(e.get("name", "")),
+                "entity_type": str(e.get("type", "")),
+                "kind": str(e.get("kind", "")),
+                "signature": str(e.get("signature", "")),
+                "start_line": int(e.get("start_line", 0)),
+                "end_line": int(e.get("end_line", 0)),
+                "docs": str(e.get("docs", "")),
+                "parent": str(e.get("parent", "")),
+                "visibility": str(e.get("visibility", "")),
+                "scope": str(e.get("scope", "")),
+                "language": language,
+            }
+            for e in entities
+        ]
+        entity_ids = write_db.batch_insert_entities(file_id, entity_rows)
+
+        # Build qualified-name -> id mapping for relations
         by_qualified_name: dict[str, int] = {}
-        for entity in entities:
-            entity_id = write_db.insert_entity(
-                file_id=file_id,
-                name=str(entity.get("name", "")),
-                entity_type=str(entity.get("type", "")),
-                kind=str(entity.get("kind", "")),
-                signature=str(entity.get("signature", "")),
-                start_line=int(entity.get("start_line", 0)),
-                end_line=int(entity.get("end_line", 0)),
-                docs=str(entity.get("docs", "")),
-                parent=str(entity.get("parent", "")),
-                visibility=str(entity.get("visibility", "")),
-                scope=str(entity.get("scope", "")),
-                language=language,
-            )
-            parent = str(entity.get("parent", ""))
-            name = str(entity.get("name", ""))
+        for entity_row, entity_id in zip(entity_rows, entity_ids):
+            parent = entity_row["parent"]
+            name = entity_row["name"]
             key = f"{parent}.{name}" if parent else name
             by_qualified_name.setdefault(key, entity_id)
 
-        relation_count = 0
-        for entity in entities:
-            parent = str(entity.get("parent", ""))
+        # -- Batch insert relations ----------------------------------------
+        relation_rows: list[tuple[int, int, str, int, str]] = []
+        for entity_row in entity_rows:
+            parent = entity_row["parent"]
             if not parent:
                 continue
-            name = str(entity.get("name", ""))
+            name = entity_row["name"]
             parent_id = by_qualified_name.get(parent)
             child_key = f"{parent}.{name}"
             child_id = by_qualified_name.get(child_key)
             if parent_id and child_id:
-                write_db.insert_entity_relation(parent_id, child_id, "defines", int(entity.get("start_line", 0)), "")
-                relation_count += 1
+                relation_rows.append(
+                    (parent_id, child_id, "defines", entity_row["start_line"], "")
+                )
 
-        for dep in dependencies:
-            write_db.insert_dependency(
-                file_id,
-                str(dep.get("path", "")),
-                str(dep.get("type", "")),
-                int(dep.get("line_number", 0)),
-            )
+        write_db.batch_insert_relations(relation_rows)
+
+        # -- Batch insert dependencies ------------------------------------
+        dep_rows = [
+            {
+                "path": str(dep.get("path", "")),
+                "type": str(dep.get("type", "")),
+                "line_number": int(dep.get("line_number", 0)),
+            }
+            for dep in dependencies
+        ]
+        write_db.batch_insert_dependencies(file_id, dep_rows)
 
         write_db.commit()
 
         if self.verbose:
             self._log(
-                f"indexed {path}: entities={len(entities)} deps={len(dependencies)} relations={relation_count}"
+                f"indexed {path}: entities={len(entities)} deps={len(dependencies)} relations={len(relation_rows)}"
             )
 
         return {
             "skipped": False,
             "skip_reason": "",
-            "path": str(path),
+            "path": path,
             "entities": len(entities),
             "dependencies": len(dependencies),
-            "relations": relation_count,
+            "relations": len(relation_rows),
         }
 
     def _sync_staging_to_destination(self) -> None:
@@ -451,19 +466,31 @@ class Indexer:
         try:
             existing_hash_by_path = {f.path: f.hash for f in self.db.get_files()}
             precheck_start = time.monotonic()
-            for path in paths:
-                try:
-                    probe = _probe_file_job(str(path))
-                except Exception as err:  # noqa: BLE001
-                    self._progress(f"[index] failed during precheck at {path}: {err}")
-                    raise
-                probes[str(path)] = probe
 
-                existing_hash = existing_hash_by_path.get(str(path), "")
-                if existing_hash and existing_hash == str(probe["hash"]):
-                    _record_skip({"skipped": True, "skip_reason": "unchanged_hash", "path": str(path)})
-                else:
-                    changed_paths.append(path)
+            # Parallelize I/O-bound file reads + hashing with threads.
+            probe_workers = max(1, min(self.parse_workers * 2, 16))
+            posix_by_path = {id(p): p.as_posix() for p in paths}
+
+            with ThreadPoolExecutor(max_workers=probe_workers) as tpool:
+                future_to_path = {
+                    tpool.submit(_probe_file_job, posix_by_path[id(p)]): p
+                    for p in paths
+                }
+                for future in as_completed(future_to_path):
+                    path = future_to_path[future]
+                    posix_path = posix_by_path[id(path)]
+                    try:
+                        probe = future.result()
+                    except Exception as err:  # noqa: BLE001
+                        self._progress(f"[index] failed during precheck at {path}: {err}")
+                        raise
+                    probes[posix_path] = probe
+
+                    existing_hash = existing_hash_by_path.get(posix_path, "")
+                    if existing_hash and existing_hash == str(probe["hash"]):
+                        _record_skip({"skipped": True, "skip_reason": "unchanged_hash", "path": posix_path})
+                    else:
+                        changed_paths.append(path)
 
             precheck_elapsed = time.monotonic() - precheck_start
             self._progress(
@@ -484,10 +511,11 @@ class Indexer:
                 done = skipped
                 for path in changed_paths:
                     try:
-                        probe = probes[str(path)]
+                        posix_path = path.as_posix()
+                        probe = probes[posix_path]
                         t0 = time.monotonic()
                         prepared = _prepare_file_job(
-                            file_path=str(path),
+                            file_path=posix_path,
                             content_hash=str(probe["hash"]),
                             lines_of_code=int(probe["lines_of_code"]),
                             tokens=int(probe["tokens"]),
@@ -511,10 +539,11 @@ class Indexer:
                 done = skipped
                 with ProcessPoolExecutor(max_workers=self.parse_workers) as pool:
                     for path in changed_paths:
-                        probe = probes[str(path)]
+                        posix_path = path.as_posix()
+                        probe = probes[posix_path]
                         future = pool.submit(
                             _prepare_file_job,
-                            str(path),
+                            posix_path,
                             str(probe["hash"]),
                             int(probe["lines_of_code"]),
                             int(probe["tokens"]),
@@ -605,7 +634,7 @@ def _probe_file_job(file_path: str) -> dict[str, object]:
     content_hash = hashlib.md5(content.encode("utf-8", errors="replace")).hexdigest()
 
     return {
-        "path": str(path),
+        "path": path.as_posix(),
         "hash": content_hash,
         "lines_of_code": lines_of_code,
         "tokens": tokens,
@@ -615,7 +644,7 @@ def _probe_file_job(file_path: str) -> dict[str, object]:
 def _prepare_file_job(file_path: str, content_hash: str, lines_of_code: int, tokens: int) -> dict[str, object]:
     path = Path(file_path)
     content = path.read_text(encoding="utf-8", errors="replace")
-    parsed: ParseResult = parse(str(path), content)
+    parsed: ParseResult = parse(path.as_posix(), content)
 
     entities = [
         {
@@ -642,7 +671,7 @@ def _prepare_file_job(file_path: str, content_hash: str, lines_of_code: int, tok
     ]
 
     return {
-        "path": str(path),
+        "path": path.as_posix(),
         "hash": content_hash,
         "lines_of_code": lines_of_code,
         "tokens": tokens,
