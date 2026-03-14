@@ -174,7 +174,7 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		}
 		candidates := []string{importBase}
 		if filepath.Ext(importBase) == "" {
-			for _, ext := range []string{".go", ".py", ".js", ".ts", ".jsx", ".tsx", ".java"} {
+			for _, ext := range []string{".go", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".h", ".cpp", ".cc", ".hpp"} {
 				candidates = append(candidates, importBase+ext)
 			}
 		}
@@ -493,7 +493,7 @@ func resolveDepToID(targetPath string, baseToPaths map[string][]string, pathToID
 	}
 	candidates := []string{base}
 	if filepath.Ext(base) == "" {
-		for _, ext := range []string{".java", ".go", ".py", ".js", ".ts"} {
+		for _, ext := range []string{".java", ".go", ".py", ".js", ".ts", ".c", ".h", ".cpp", ".hpp"} {
 			candidates = append(candidates, base+ext)
 		}
 	}
@@ -529,7 +529,7 @@ func pathSuffixMatch(filePath, importPath string) bool {
 		return false
 	}
 	// Check if filePath ends with importPath (with or without extension).
-	for _, suffix := range []string{importPath, importPath + ".go", importPath + ".py", importPath + ".js", importPath + ".ts"} {
+	for _, suffix := range []string{importPath, importPath + ".go", importPath + ".py", importPath + ".js", importPath + ".ts", importPath + ".c", importPath + ".h", importPath + ".cpp", importPath + ".hpp"} {
 		if len(filePath) >= len(suffix) && filePath[len(filePath)-len(suffix):] == suffix {
 			return true
 		}

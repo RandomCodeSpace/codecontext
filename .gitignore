@@ -5,3 +5,4 @@ codecontext
 *.out
 pulsar-master/
 .claude
+.vscode/

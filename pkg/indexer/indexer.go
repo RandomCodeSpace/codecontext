@@ -346,6 +346,8 @@ func isSourceFile(ext string) bool {
 	return map[string]bool{
 		".go": true, ".js": true, ".ts": true, ".jsx": true, ".tsx": true,
 		".py": true, ".java": true,
+		".c": true, ".h": true, ".cpp": true, ".cc": true, ".cxx": true,
+		".hpp": true, ".hxx": true, ".hh": true,
 	}[ext]
 }
 

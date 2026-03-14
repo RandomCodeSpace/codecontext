@@ -87,6 +87,12 @@ header{
 }
 #empty-hint svg{opacity:.3}
 #empty-hint p{font-size:12px;text-align:center;line-height:1.7}
+#filter-hint{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;color:var(--text3);gap:10px;pointer-events:none;
+}
+#filter-hint svg{opacity:.3}
+#filter-hint p{font-size:12px;text-align:center;line-height:1.7}
 code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--accent2)}
 
 /* ── Detail panel ── */
@@ -232,6 +238,13 @@ code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--ac
       </svg>
       <p>No data yet.<br>Run <code>codecontext index .</code> to index your project.</p>
     </div>
+    <div id="filter-hint" style="display:none">
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+        <circle cx="24" cy="24" r="18" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"/>
+        <path d="M18 22h12M18 26h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <p>All files hidden by the active filter.<br>Click a <b style="color:var(--accent2)">language pill</b> to show files,<br>or press <code>reset</code>.</p>
+    </div>
   </div>
 
   <div class="panel-toggle" id="panel-toggle" title="Toggle panel (P)">&#x25B6;</div>
@@ -283,7 +296,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--ac
     <div class="help-section">
       <div class="help-section-title">Chart Colors</div>
       <div class="help-row"><span class="help-swatch" style="background:#f97316"></span> <b>Bright</b> = source file (colored by language)</div>
-      <div class="help-row"><span class="help-swatch" style="background:#4b2308"></span> <b>Dark / muted</b> = directory (tinted by dominant language)</div>
+      <div class="help-row"><span class="help-swatch" style="background:#131c2a;border-left:2px solid #f97316"></span> <b>Dark + stripe</b> = directory (stripe = dominant language)</div>
       <div class="help-row"><span class="help-swatch" style="background:#4338ca"></span> <b>Indigo</b> = currently selected</div>
       <div class="help-row"><span class="help-swatch" style="background:#f59e0b"></span> <b>Amber</b> = search match</div>
     </div>
@@ -297,7 +310,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:3px;color:var(--ac
 <script>
 'use strict';
 
-const LANG_COLOR={java:'#f97316',go:'#00ADD8',python:'#3b82f6',javascript:'#f59e0b',typescript:'#60a5fa',_dir:'#1e3a5f',_default:'#334155'};
+const LANG_COLOR={java:'#f97316',go:'#00ADD8',python:'#3b82f6',javascript:'#f59e0b',typescript:'#60a5fa',c:'#a8b9cc',cpp:'#f34b7d',_dir:'#131c2a',_dirAlt:'#172131',_default:'#334155'};
 
 let treeRoot=null,zoomedPath='',hoveredNode=null,selectedNode=null,searchText='',langFilter=new Set();
 let layoutCache=[];
@@ -314,6 +327,7 @@ const panelBody=document.getElementById('panel-body');
 const panelHint=document.getElementById('panel-hint');
 const panelContent=document.getElementById('panel-content');
 const emptyHint=document.getElementById('empty-hint');
+const filterHint=document.getElementById('filter-hint');
 
 function fmt(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'K':String(n)}
 
@@ -327,12 +341,43 @@ function dimColor(hex,factor){
   return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
 }
 
-function nodeColor(node){
-  var base=(node.lang&&LANG_COLOR[node.lang])?LANG_COLOR[node.lang]:LANG_COLOR._default;
+function nodeColor(node,depth){
   // Files: bright saturated language color
-  if(isFile(node))return base;
-  // Directories: dark muted tint of dominant language
-  return dimColor(base,0.3);
+  if(isFile(node)){
+    return (node.lang&&LANG_COLOR[node.lang])?LANG_COLOR[node.lang]:LANG_COLOR._default;
+  }
+  // Directories: neutral dark tone — alternates by depth for visual layering
+  return (depth||0)%2===0?LANG_COLOR._dir:LANG_COLOR._dirAlt;
+}
+
+// Returns the accent color for a directory's left stripe based on
+// the dominant *visible* language (respects the active filter).
+function dirAccentColor(node){
+  // No filter — use the node's dominant language
+  if(langFilter.size===0){
+    return (node.lang&&LANG_COLOR[node.lang])?LANG_COLOR[node.lang]:LANG_COLOR._default;
+  }
+  // If the node's dominant lang is still visible, use it
+  if(node.lang&&!langFilter.has(node.lang)&&LANG_COLOR[node.lang])return LANG_COLOR[node.lang];
+  // Otherwise scan immediate children for the first visible language
+  if(node.children){
+    for(var i=0;i<node.children.length;i++){
+      var c=node.children[i];
+      if(c.lang&&!langFilter.has(c.lang)&&LANG_COLOR[c.lang])return LANG_COLOR[c.lang];
+    }
+  }
+  return LANG_COLOR._default;
+}
+
+// Count files per language in the tree (used for pill labels).
+function countByLang(node){
+  var acc={};
+  function walk(n){
+    if(isFile(n)&&n.lang){acc[n.lang]=(acc[n.lang]||0)+1;}
+    if(n.children)for(var i=0;i<n.children.length;i++)walk(n.children[i]);
+  }
+  walk(node);
+  return acc;
 }
 
 function lighten(hex,amt){
@@ -380,12 +425,15 @@ function draw(){
   var W=canvas.width/dpr,H=canvas.height/dpr;
   ctx.clearRect(0,0,W,H);
   layoutCache=[];
-  if(!treeRoot){emptyHint.style.display='flex';return;}
+  if(!treeRoot){emptyHint.style.display='flex';filterHint.style.display='none';return;}
   emptyHint.style.display='none';
+  filterHint.style.display='none';
   var zr=findNode(treeRoot,zoomedPath)||treeRoot;
   var depth=maxDepth(zr);
   var rowH=Math.max(18,Math.min(44,Math.floor(H/Math.max(depth+1,1))));
   drawNode(zr,0,0,W,rowH,0);
+  // Show filter-empty message when all files are hidden
+  if(langFilter.size>0&&layoutCache.length<=1){filterHint.style.display='flex';}
   // Hover highlight
   if(hoveredNode){
     var entry=null;
@@ -423,7 +471,7 @@ function drawNode(node,depth,x,w,rowH,offsetDepth){
   var y=(depth-offsetDepth)*rowH;
   if(y>canvas.height/dpr)return;
   var h=rowH-GAP;
-  var color=nodeColor(node);
+  var color=nodeColor(node,depth);
   var lc=searchText.toLowerCase();
   var matched=lc&&node.path.toLowerCase().indexOf(lc)>=0;
   if(matched)color='#f59e0b';
@@ -433,11 +481,15 @@ function drawNode(node,depth,x,w,rowH,offsetDepth){
   ctx.fillStyle=color;
   ctx.fillRect(x,y,w-GAP,h);
   ctx.shadowBlur=0;ctx.shadowColor='transparent';
-  // Left accent stripe for directories — use bright language color
+  // Left accent stripe for directories — use dominant *visible* language color
   if(!isFile(node)){
-    var accent=(node.lang&&LANG_COLOR[node.lang])?LANG_COLOR[node.lang]:LANG_COLOR._default;
-    ctx.fillStyle=accent;
+    ctx.fillStyle=dirAccentColor(node);
     ctx.fillRect(x,y,2,h);
+  }
+  // Bottom edge glow for files — subtle language tint
+  if(isFile(node)&&w>4){
+    ctx.fillStyle=hexAlpha((node.lang&&LANG_COLOR[node.lang])?LANG_COLOR[node.lang]:LANG_COLOR._default,0.3);
+    ctx.fillRect(x,y+h-1,w-GAP,1);
   }
   // Label — show visible count when filtering, full count otherwise
   if(w>36){
@@ -548,6 +600,8 @@ function buildLangPills(){
   container.innerHTML='';
   if(!langs.length)return;
 
+  var langCounts=countByLang(treeRoot);
+
   // Label
   var lbl=document.createElement('span');
   lbl.className='lang-pills-label';lbl.textContent='langs:';
@@ -557,13 +611,14 @@ function buildLangPills(){
 
   langs.forEach(function(lang){
     var c=LANG_COLOR[lang]||LANG_COLOR._default;
+    var cnt=langCounts[lang]||0;
     var pill=document.createElement('div');
     pill.className='lang-pill active';
     pill.style.color=c;
     pill.style.borderColor=c;
     pill.style.background=hexAlpha(c,0.18);
-    pill.textContent=lang;
-    pill.title='Click to hide '+lang+' files';
+    pill.textContent=lang+' '+fmt(cnt);
+    pill.title='Click to hide '+lang+' files ('+fmt(cnt)+' files)';
     pillEls[lang]=pill;
 
     pill.onclick=function(){
@@ -719,7 +774,7 @@ helpOverlay.addEventListener('click',function(e){if(e.target===helpOverlay)toggl
 // Populate language colors in help
 (function(){
   var el=document.getElementById('help-langs');
-  var langs={java:'#f97316',go:'#00ADD8',python:'#3b82f6',javascript:'#f59e0b',typescript:'#60a5fa'};
+  var langs={java:'#f97316',go:'#00ADD8',python:'#3b82f6',javascript:'#f59e0b',typescript:'#60a5fa',c:'#a8b9cc',cpp:'#f34b7d'};
   var html='';
   for(var l in langs)html+='<div class="help-row"><span class="help-swatch" style="background:'+langs[l]+'"></span> '+l+'</div>';
   el.innerHTML=html;

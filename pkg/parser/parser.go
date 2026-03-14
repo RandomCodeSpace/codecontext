@@ -4,9 +4,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	cparser "github.com/RandomCodeSpace/codecontext/pkg/parser/c"
+	cppparser "github.com/RandomCodeSpace/codecontext/pkg/parser/cpp"
 	goparser "github.com/RandomCodeSpace/codecontext/pkg/parser/go"
-	jsparser "github.com/RandomCodeSpace/codecontext/pkg/parser/javascript"
 	javaparser "github.com/RandomCodeSpace/codecontext/pkg/parser/java"
+	jsparser "github.com/RandomCodeSpace/codecontext/pkg/parser/javascript"
 	pyparser "github.com/RandomCodeSpace/codecontext/pkg/parser/python"
 )
 
@@ -47,6 +49,22 @@ func Parse(filePath string, content string) (*ParseResult, error) {
 			return nil, err
 		}
 		return convertJavaParseResult(filePath, result), nil
+
+	case C:
+		parser := &cparser.CParser{}
+		result, err := parser.Parse(filePath, content)
+		if err != nil {
+			return nil, err
+		}
+		return convertCParseResult(filePath, result), nil
+
+	case Cpp:
+		parser := &cppparser.CppParser{}
+		result, err := parser.Parse(filePath, content)
+		if err != nil {
+			return nil, err
+		}
+		return convertCppParseResult(filePath, result), nil
 
 	default:
 		return &ParseResult{
@@ -168,6 +186,52 @@ func convertJavaParseResult(filePath string, result *javaparser.ParseResult) *Pa
 	return main
 }
 
+// convertCParseResult converts a C sub-parser result to the main ParseResult.
+func convertCParseResult(filePath string, result *cparser.ParseResult) *ParseResult {
+	main := &ParseResult{
+		FilePath:     filePath,
+		Language:     C,
+		Entities:     make([]*Entity, len(result.Entities)),
+		Dependencies: make([]*Dependency, len(result.Dependencies)),
+	}
+	for i, e := range result.Entities {
+		main.Entities[i] = &Entity{
+			Name: e.Name, Type: e.Type, Kind: e.Kind,
+			Signature: e.Signature, StartLine: e.StartLine, EndLine: e.EndLine,
+			Docs: e.Docs, Parent: e.Parent, Language: C,
+		}
+	}
+	for i, d := range result.Dependencies {
+		main.Dependencies[i] = &Dependency{
+			Path: d.Path, Type: d.Type, LineNumber: d.LineNumber, IsLocal: d.IsLocal,
+		}
+	}
+	return main
+}
+
+// convertCppParseResult converts a C++ sub-parser result to the main ParseResult.
+func convertCppParseResult(filePath string, result *cppparser.ParseResult) *ParseResult {
+	main := &ParseResult{
+		FilePath:     filePath,
+		Language:     Cpp,
+		Entities:     make([]*Entity, len(result.Entities)),
+		Dependencies: make([]*Dependency, len(result.Dependencies)),
+	}
+	for i, e := range result.Entities {
+		main.Entities[i] = &Entity{
+			Name: e.Name, Type: e.Type, Kind: e.Kind,
+			Signature: e.Signature, StartLine: e.StartLine, EndLine: e.EndLine,
+			Docs: e.Docs, Parent: e.Parent, Language: Cpp,
+		}
+	}
+	for i, d := range result.Dependencies {
+		main.Dependencies[i] = &Dependency{
+			Path: d.Path, Type: d.Type, LineNumber: d.LineNumber, IsLocal: d.IsLocal,
+		}
+	}
+	return main
+}
+
 func detectLanguage(ext string) Language {
 	switch ext {
 	case ".go":
@@ -180,6 +244,10 @@ func detectLanguage(ext string) Language {
 		return TypeScript
 	case ".java":
 		return Java
+	case ".c", ".h":
+		return C
+	case ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".hh":
+		return Cpp
 	default:
 		return ""
 	}

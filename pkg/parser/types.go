@@ -9,6 +9,8 @@ const (
 	JavaScript Language = "javascript"
 	TypeScript Language = "typescript"
 	Java       Language = "java"
+	C          Language = "c"
+	Cpp        Language = "cpp"
 )
 
 type ParseResult struct {

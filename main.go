@@ -20,6 +20,10 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+
+
+
+
 var version = "dev"
 
 const usage = `codecontext - aggregate source files and build code graphs with AI analysis
@@ -37,6 +41,7 @@ Commands:
   web                  Start web UI to visualise the code graph
   serve                Start web UI + MCP HTTP server on the same port
   mcp                  Start MCP server (for Claude integration)
+  setup                Write MCP stdio config for Claude Code and VS Code / GitHub Copilot
 
 Flags:
   -ext string          Comma-separated file extensions to include (e.g. .go,.ts)
@@ -59,6 +64,11 @@ AI Subcommands:
   codecontext ai summarize <file>        Summary of a file's purpose
   codecontext ai chat                    Multi-turn conversation about code
 
+Setup Flags (codecontext setup):
+  -claude              Write .mcp.json for Claude Code (default: true)
+  -vscode              Write .vscode/mcp.json for VS Code / GitHub Copilot (default: true)
+  -binary string       Path to codecontext binary (default: auto-detected)
+
 Examples:
   codecontext .                              # aggregate all files in current directory
   codecontext -ext .go,.md .                 # aggregate only .go and .md files
@@ -77,6 +87,8 @@ Examples:
   codecontext mcp                            # start MCP server (stdio)
   codecontext mcp -http                      # start MCP server (HTTP on :8081)
   codecontext mcp -http -addr :9000          # start MCP server (HTTP on :9000)
+  codecontext setup                          # configure MCP stdio for all editors
+  codecontext setup -vscode=false            # configure only Claude Code
 `
 
 func main() {
@@ -119,6 +131,8 @@ func main() {
 		handleServe(graphDB, cmdArgs, *verbose)
 	case "mcp":
 		handleMCP(graphDB, cmdArgs)
+	case "setup":
+		handleSetup(cmdArgs)
 	default:
 		legacyAggregate(command, ext)
 		for _, arg := range cmdArgs {
@@ -760,6 +774,78 @@ func handleAIChat(ctx context.Context, chain *ai.Chain) {
 		}
 		fmt.Print("> ")
 	}
+}
+
+// --------------------------------------------------------------------------
+// setup command — write MCP stdio config for Claude Code, VS Code, Antigravity
+// --------------------------------------------------------------------------
+
+func handleSetup(args []string) {
+	fs := flag.NewFlagSet("setup", flag.ExitOnError)
+	doClaude := fs.Bool("claude", true, "write .mcp.json for Claude Code")
+	doVSCode := fs.Bool("vscode", true, "write .vscode/mcp.json for VS Code / GitHub Copilot")
+	binaryOverride := fs.String("binary", "", "path to codecontext binary (default: auto-detected)")
+	_ = fs.Parse(args)
+
+	binary := *binaryOverride
+	if binary == "" {
+		if exe, err := os.Executable(); err == nil {
+			binary = exe
+		} else {
+			binary = "codecontext"
+		}
+	}
+
+	if *doClaude {
+		writeSetupFile(".mcp.json", buildClaudeMCPConfig(binary), "Claude Code")
+	}
+	if *doVSCode {
+		if err := os.MkdirAll(".vscode", 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ could not create .vscode/: %v\n", err)
+		} else {
+			writeSetupFile(filepath.Join(".vscode", "mcp.json"), buildVSCodeMCPConfig(binary), "VS Code / GitHub Copilot")
+		}
+	}
+}
+
+// buildClaudeMCPConfig returns the .mcp.json content for Claude Code.
+// Claude Code reads mcpServers from the project-level .mcp.json.
+func buildClaudeMCPConfig(binary string) []byte {
+	cfg := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"codecontext": map[string]interface{}{
+				"command": binary,
+				"args":    []string{"mcp"},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	return append(data, '\n')
+}
+
+// buildVSCodeMCPConfig returns the .vscode/mcp.json content for VS Code.
+// VS Code uses "servers" with an explicit "type": "stdio" field.
+func buildVSCodeMCPConfig(binary string) []byte {
+	cfg := map[string]interface{}{
+		"servers": map[string]interface{}{
+			"codecontext": map[string]interface{}{
+				"type":    "stdio",
+				"command": binary,
+				"args":    []string{"mcp"},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	return append(data, '\n')
+}
+
+
+func writeSetupFile(path string, content []byte, label string) {
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ [%s] failed to write %s: %v\n", label, path, err)
+		return
+	}
+	fmt.Printf("✅ [%s] wrote %s\n", label, path)
 }
 
 // --------------------------------------------------------------------------
