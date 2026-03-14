@@ -57,6 +57,11 @@ class EntityRelation:
     context: str
 
 
+def _posix(path: str) -> str:
+    """Normalize a file path to forward slashes for consistent storage/lookup."""
+    return path.replace("\\", "/")
+
+
 class Database:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
@@ -144,11 +149,12 @@ class Database:
         self.conn.commit()
 
     def insert_file(self, path: str, language: str, file_hash: str, lines_of_code: int, tokens: int) -> int:
-        row = self.conn.execute("SELECT id FROM files WHERE path = ?", (path,)).fetchone()
+        normalized = _posix(path)
+        row = self.conn.execute("SELECT id FROM files WHERE path = ?", (normalized,)).fetchone()
         if row is None:
             cur = self.conn.execute(
                 "INSERT INTO files(path, language, hash, lines_of_code, tokens) VALUES (?, ?, ?, ?, ?)",
-                (path, language, file_hash, lines_of_code, tokens),
+                (normalized, language, file_hash, lines_of_code, tokens),
             )
             return int(cur.lastrowid)
 
@@ -162,7 +168,7 @@ class Database:
     def get_file_by_path(self, path: str) -> File | None:
         row = self.conn.execute(
             "SELECT id, path, language, hash, lines_of_code, tokens FROM files WHERE path = ?",
-            (path,),
+            (_posix(path),),
         ).fetchone()
         if row is None:
             return None
@@ -378,7 +384,7 @@ class Database:
         return [self._row_to_entity(row) for row in rows]
 
     def get_file_imports(self, path: str) -> list[str]:
-        file = self.get_file_by_path(path)
+        file = self.get_file_by_path(_posix(path))
         if file is None:
             return []
         rows = self.conn.execute(
@@ -407,7 +413,8 @@ class Database:
         }
 
     def get_dependency_graph(self, file_path: str) -> dict[str, Any]:
-        file = self.get_file_by_path(file_path)
+        normalized = _posix(file_path)
+        file = self.get_file_by_path(normalized)
         if file is None:
             raise ValueError(f"file not found: {file_path}")
         deps = self.get_dependencies(file.id)

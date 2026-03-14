@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .db import Dependency, Entity, EntityRelation, File
+from .db import Dependency, Entity, EntityRelation, File, _posix
 
 
 class CogDatabase:
@@ -117,7 +117,8 @@ class CogDatabase:
     # ── File operations ─────────────────────────────────────────────
 
     def insert_file(self, path: str, language: str, file_hash: str, lines_of_code: int, tokens: int) -> int:
-        existing = self._find_file_node(path)
+        normalized = _posix(path)
+        existing = self._find_file_node(normalized)
         if existing is not None:
             node_id, data = existing
             data.update(language=language, hash=file_hash, lines_of_code=lines_of_code, tokens=tokens)
@@ -129,19 +130,19 @@ class CogDatabase:
         node_id = f"file:{file_id}"
         data = {
             "id": file_id,
-            "path": path,
+            "path": normalized,
             "language": language,
             "hash": file_hash,
             "lines_of_code": lines_of_code,
             "tokens": tokens,
         }
         self._put_data(node_id, data)
-        self._add_ref(f"_idx:fp:{path}", node_id)
+        self._add_ref(f"_idx:fp:{normalized}", node_id)
         self._add_ref("_all:files", node_id)
         return file_id
 
     def _find_file_node(self, path: str) -> tuple[str, dict[str, Any]] | None:
-        refs = self._get_refs(f"_idx:fp:{path}")
+        refs = self._get_refs(f"_idx:fp:{_posix(path)}")
         if not refs:
             return None
         node_id = refs[0]
