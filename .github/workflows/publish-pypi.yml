@@ -37,6 +37,7 @@ jobs:
           packages-dir: dist
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
+          verbose: true
 
       - name: Publish stable release to PyPI
         if: ${{ (github.event_name == 'release' && !github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && !contains(inputs.tag, '-')) }}
@@ -44,3 +45,4 @@ jobs:
         with:
           packages-dir: dist
           skip-existing: true
+          verbose: true

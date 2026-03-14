@@ -60,6 +60,11 @@ jobs:
       - name: Build python distributions
         run: uv build
 
+      - name: Validate built distributions
+        run: |
+          uvx twine check dist/*
+          ls -lh dist
+
       - name: Create tag and release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -97,6 +102,7 @@ jobs:
           packages-dir: dist
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
+          verbose: true
 
       - name: Publish stable release to PyPI
         if: ${{ !contains(inputs.version, '-') }}
@@ -104,3 +110,4 @@ jobs:
         with:
           packages-dir: dist
           skip-existing: true
+          verbose: true
