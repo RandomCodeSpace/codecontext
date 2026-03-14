@@ -37,7 +37,7 @@ func (idx *Indexer) SetVerbose(v bool) {
 
 func (idx *Indexer) log(format string, args ...interface{}) {
 	if idx.verbose {
-		fmt.Printf(format+"\n", args...)
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
 	}
 }
 
@@ -291,7 +291,7 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 	}
 
 	total := len(paths)
-	fmt.Printf("  🗂️  Found %d source files — indexing with %d workers\n", total, workers())
+	fmt.Fprintf(os.Stderr, "  🗂️  Found %d source files — indexing with %d workers\n", total, workers())
 
 	// Worker pool: feed file paths through a channel.
 	pathCh := make(chan string, total)
@@ -318,14 +318,14 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 				n := processed.Add(1)
 				// Print a compact progress line every 10 files (or on first/last).
 				if !idx.verbose && (n%10 == 0 || n == int64(total)) {
-					fmt.Printf("  ⏳ Progress: %d/%d files indexed\r", n, total)
+					fmt.Fprintf(os.Stderr, "  ⏳ Progress: %d/%d files indexed\r", n, total)
 				}
 			}
 		}()
 	}
 
 	wg.Wait()
-	fmt.Printf("\n  📊 Indexed %d/%d files, %d errors\n", processed.Load()-errCount.Load(), total, errCount.Load())
+	fmt.Fprintf(os.Stderr, "\n  📊 Indexed %d/%d files, %d errors\n", processed.Load()-errCount.Load(), total, errCount.Load())
 	return nil
 }
 
