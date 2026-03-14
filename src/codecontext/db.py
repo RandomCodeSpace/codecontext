@@ -444,6 +444,98 @@ class Database:
         row = self.conn.execute("SELECT COUNT(*) AS c FROM entity_relations").fetchone()
         return int(row["c"])
 
+    def begin_bulk_operation(self) -> None:
+        """Set SQLite PRAGMAs optimized for bulk writes (less durability, more speed)."""
+        self.conn.execute("PRAGMA synchronous = OFF")
+        self.conn.execute("PRAGMA cache_size = -64000")  # 64 MB
+        self.conn.execute("PRAGMA temp_store = MEMORY")
+
+    def end_bulk_operation(self) -> None:
+        """Restore safe SQLite PRAGMAs after bulk writes."""
+        self.conn.execute("PRAGMA synchronous = FULL")
+        self.conn.execute("PRAGMA cache_size = -2000")  # default ~2 MB
+        self.conn.execute("PRAGMA temp_store = DEFAULT")
+
+    def bulk_sync_files(self, rows: list[dict[str, Any]]) -> dict[int, int]:
+        """Bulk-insert files from staging. Returns {stage_id: dest_id} map."""
+        id_map: dict[int, int] = {}
+        for r in rows:
+            stage_id = r["stage_id"]
+            normalized = _posix(r["path"])
+            existing = self.conn.execute(
+                "SELECT id FROM files WHERE path = ?", (normalized,)
+            ).fetchone()
+            if existing is not None:
+                file_id = int(existing["id"])
+                self.conn.execute(
+                    "DELETE FROM entities WHERE file_id = ?", (file_id,)
+                )
+                self.conn.execute(
+                    "DELETE FROM dependencies WHERE source_file_id = ?", (file_id,)
+                )
+                self.conn.execute(
+                    "UPDATE files SET language=?, hash=?, lines_of_code=?, tokens=? WHERE id=?",
+                    (r["language"], r["hash"], r["lines_of_code"], r["tokens"], file_id),
+                )
+            else:
+                cur = self.conn.execute(
+                    "INSERT INTO files(path, language, hash, lines_of_code, tokens) VALUES (?,?,?,?,?)",
+                    (normalized, r["language"], r["hash"], r["lines_of_code"], r["tokens"]),
+                )
+                file_id = int(cur.lastrowid)
+            id_map[stage_id] = file_id
+        return id_map
+
+    def bulk_insert_entities(self, rows: list[dict[str, Any]]) -> dict[int, int]:
+        """Bulk-insert entities from staging. Returns {stage_id: dest_id} map."""
+        id_map: dict[int, int] = {}
+        for r in rows:
+            cur = self.conn.execute(
+                """INSERT INTO entities(file_id, name, type, kind, signature,
+                   start_line, end_line, documentation, parent, visibility,
+                   scope, language)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    r["file_id"], r["name"], r["entity_type"], r.get("kind", ""),
+                    r.get("signature", ""), r.get("start_line", 0),
+                    r.get("end_line", 0), r.get("documentation", ""),
+                    r.get("parent", ""), r.get("visibility", ""),
+                    r.get("scope", ""), r.get("language", ""),
+                ),
+            )
+            id_map[r["stage_id"]] = int(cur.lastrowid)
+        return id_map
+
+    def bulk_insert_dependencies(self, rows: list[dict[str, Any]]) -> int:
+        """Bulk-insert dependencies from staging sync. Returns count."""
+        if not rows:
+            return 0
+        params = [
+            (r["source_file_id"], r["target_path"], r["import_type"], r.get("line_number", 0))
+            for r in rows
+        ]
+        self.conn.executemany(
+            "INSERT INTO dependencies(source_file_id, target_path, import_type, line_number) VALUES (?,?,?,?)",
+            params,
+        )
+        return len(rows)
+
+    def bulk_insert_relations(self, rows: list[dict[str, Any]]) -> int:
+        """Bulk-insert relations from staging sync. Returns count."""
+        if not rows:
+            return 0
+        params = [
+            (r["source_entity_id"], r["target_entity_id"], r["relation_type"],
+             r.get("line_number", 0), r.get("context", ""))
+            for r in rows
+        ]
+        self.conn.executemany(
+            """INSERT INTO entity_relations(source_entity_id, target_entity_id,
+               relation_type, line_number, context) VALUES (?,?,?,?,?)""",
+            params,
+        )
+        return len(rows)
+
     def batch_insert_entities(
         self,
         file_id: int,

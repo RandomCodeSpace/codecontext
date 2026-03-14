@@ -21,6 +21,7 @@ class Indexer:
         self.verbose = False
         self.parse_workers = _workers()
         self._stage_db: Database | None = None
+        self._staging_enabled = False
 
     def set_verbose(self, verbose: bool) -> None:
         self.verbose = verbose
@@ -90,7 +91,10 @@ class Indexer:
                 self._close_stage_db()
 
     def _use_staging(self) -> bool:
-        return False
+        return self._staging_enabled
+
+    def _enable_staging(self, enabled: bool = True) -> None:
+        self._staging_enabled = enabled
 
     def _get_stage_db(self) -> Database:
         if self._stage_db is None:
@@ -402,8 +406,13 @@ class Indexer:
         paths = [p for p in root.rglob("*") if p.is_file() and _is_source_file(p.suffix.lower()) and not _is_hidden(p)]
         total = len(paths)
 
+        # Enable in-memory staging: all writes go to RAM, then bulk-sync to disk.
+        use_staging = total > 10 and self.backend == "sqlite"
+        self._enable_staging(use_staging)
+        staging_label = " staging=memory" if use_staging else ""
+
         mode = "parallel parse + serialized writes" if self.parse_workers > 1 else "sequential mode"
-        self._progress(f"[index] found {total} source files; workers={self.parse_workers} ({mode})")
+        self._progress(f"[index] found {total} source files; workers={self.parse_workers} ({mode}){staging_label}")
 
         if total == 0:
             return
@@ -464,6 +473,11 @@ class Indexer:
             last_report = now
 
         try:
+            # Enable performance PRAGMAs for bulk operations on the destination DB.
+            begin_bulk = getattr(self.db, "begin_bulk_operation", None)
+            if callable(begin_bulk):
+                begin_bulk()
+
             existing_hash_by_path = {f.path: f.hash for f in self.db.get_files()}
             precheck_start = time.monotonic()
 
@@ -512,14 +526,8 @@ class Indexer:
                 for path in changed_paths:
                     try:
                         posix_path = path.as_posix()
-                        probe = probes[posix_path]
                         t0 = time.monotonic()
-                        prepared = _prepare_file_job(
-                            file_path=posix_path,
-                            content_hash=str(probe["hash"]),
-                            lines_of_code=int(probe["lines_of_code"]),
-                            tokens=int(probe["tokens"]),
-                        )
+                        prepared = _full_parse_job(posix_path)
                         stats = self._apply_prepared(prepared)
                         took = time.monotonic() - t0
                         if took >= 2.0:
@@ -540,14 +548,7 @@ class Indexer:
                 with ProcessPoolExecutor(max_workers=self.parse_workers) as pool:
                     for path in changed_paths:
                         posix_path = path.as_posix()
-                        probe = probes[posix_path]
-                        future = pool.submit(
-                            _prepare_file_job,
-                            posix_path,
-                            str(probe["hash"]),
-                            int(probe["lines_of_code"]),
-                            int(probe["tokens"]),
-                        )
+                        future = pool.submit(_full_parse_job, posix_path)
                         future_map[future] = path
 
                     for future in as_completed(future_map):
@@ -580,6 +581,11 @@ class Indexer:
                     self._progress(f"[index] skipped reason {reason}: {count}{sample}")
         finally:
             self._close_stage_db()
+            self._enable_staging(False)
+            # Restore safe PRAGMAs.
+            end_bulk = getattr(self.db, "end_bulk_operation", None)
+            if callable(end_bulk):
+                end_bulk()
 
     def query_entity(self, name: str) -> list[Entity]:
         return self.db.get_entity_by_name(name)
@@ -644,6 +650,52 @@ def _probe_file_job(file_path: str) -> dict[str, object]:
 def _prepare_file_job(file_path: str, content_hash: str, lines_of_code: int, tokens: int) -> dict[str, object]:
     path = Path(file_path)
     content = path.read_text(encoding="utf-8", errors="replace")
+    parsed: ParseResult = parse(path.as_posix(), content)
+
+    entities = [
+        {
+            "name": e.name,
+            "type": e.type,
+            "kind": e.kind,
+            "signature": e.signature,
+            "start_line": e.start_line,
+            "end_line": e.end_line,
+            "docs": e.docs,
+            "parent": e.parent,
+            "visibility": e.visibility,
+            "scope": e.scope,
+        }
+        for e in parsed.entities
+    ]
+    dependencies = [
+        {
+            "path": d.path,
+            "type": d.type,
+            "line_number": d.line_number,
+        }
+        for d in parsed.dependencies
+    ]
+
+    return {
+        "path": path.as_posix(),
+        "hash": content_hash,
+        "lines_of_code": lines_of_code,
+        "tokens": tokens,
+        "language": parsed.language,
+        "entities": entities,
+        "dependencies": dependencies,
+    }
+
+
+def _full_parse_job(file_path: str) -> dict[str, object]:
+    """Single-read job: hash + parse in one file read (eliminates double I/O)."""
+    path = Path(file_path)
+    content = path.read_text(encoding="utf-8", errors="replace")
+
+    lines_of_code = content.count("\n") + (0 if content.endswith("\n") or not content else 1)
+    tokens = len(content) // 4
+    content_hash = hashlib.md5(content.encode("utf-8", errors="replace")).hexdigest()
+
     parsed: ParseResult = parse(path.as_posix(), content)
 
     entities = [
