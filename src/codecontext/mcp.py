@@ -167,7 +167,7 @@ class MCPService:
 		raise ValueError(f"unknown tool: {tool}")
 
 
-def run_stdio(graph_db: str, backend: str = "cogdb", verbose: bool = False) -> int:
+def run_stdio(graph_db: str, backend: str = "sqlite", verbose: bool = False) -> int:
 	database = open_backend(backend, graph_db, verbose)
 	indexer = Indexer(database, backend)
 	indexer.set_verbose(verbose)
@@ -195,7 +195,7 @@ def run_stdio(graph_db: str, backend: str = "cogdb", verbose: bool = False) -> i
 	return 0
 
 
-def run_http(graph_db: str, addr: str, backend: str = "cogdb", verbose: bool = False) -> int:
+def run_http(graph_db: str, addr: str, backend: str = "sqlite", verbose: bool = False) -> int:
 	try:
 		from fastapi import FastAPI
 		from fastapi.responses import JSONResponse

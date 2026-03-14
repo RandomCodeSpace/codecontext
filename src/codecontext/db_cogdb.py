@@ -8,7 +8,13 @@ from .db import Dependency, Entity, EntityRelation, File
 
 
 class CogDatabase:
-    """Graph database backend using CogDB (pure Python, cross-platform)."""
+    """Graph database backend using CogDB (pure Python, cross-platform).
+
+    Performance optimizations:
+    - flush_interval=0: defers disk flushes to explicit commit()/close() calls
+    - put_batch(): groups multiple triples into single bulk writes
+    - In-memory dedup caches: avoids scanning CogDB on every insert
+    """
 
     def __init__(self, graph: Any, db_path: str):
         self._g = graph
@@ -17,6 +23,13 @@ class CogDatabase:
         self._next_entity_id = 1
         self._next_dep_id = 1
         self._next_rel_id = 1
+        # Write buffer: triples collected between commit() calls
+        self._write_buf: list[tuple[str, str, str]] = []
+        # In-memory caches to avoid redundant CogDB queries during indexing
+        self._file_path_cache: dict[str, int | None] = {}  # path -> file_id or None
+        self._entity_cache: dict[tuple[int, str, str, int], int] = {}  # (file_id, name, type, start_line) -> entity_id
+        self._dep_cache: dict[tuple[int, str, str, int], int] = {}  # (source_file_id, target_path, dep_type, line_number) -> dep_id
+        self._rel_cache: dict[tuple[int, int, str], int] = {}  # (source_entity_id, target_entity_id, relation_type) -> rel_id
 
     @classmethod
     def open(cls, db_path: str, verbose: bool = False) -> "CogDatabase":
@@ -33,17 +46,33 @@ class CogDatabase:
         cog_prefix = str(path.parent) if str(path.parent) not in ("", ".") else "."
         cog_home = path.stem + "_cog"
 
-        graph = Graph("codecontext", cog_home=cog_home, cog_path_prefix=cog_prefix)
+        graph = Graph(
+            "codecontext",
+            cog_home=cog_home,
+            cog_path_prefix=cog_prefix,
+            flush_interval=0,
+        )
         instance = cls(graph, db_path)
         instance._init_counters()
         return instance
 
     def close(self) -> None:
+        self._flush_buf()
         self._save_counters()
+        self._g.sync()
         self._g.close()
 
     def commit(self) -> None:
-        pass
+        self._flush_buf()
+        self._g.sync()
+
+    def _flush_buf(self) -> None:
+        if self._write_buf:
+            self._g.put_batch(self._write_buf)
+            self._write_buf.clear()
+
+    def _buf_put(self, v1: str, pred: str, v2: str) -> None:
+        self._write_buf.append((v1, pred, v2))
 
     # ── Counter management ──────────────────────────────────────────
 
@@ -89,9 +118,10 @@ class CogDatabase:
     # ── Helpers ─────────────────────────────────────────────────────
 
     def _put_data(self, node_id: str, data: dict[str, Any]) -> None:
-        self._g.put(node_id, "data", json.dumps(data, separators=(",", ":")))
+        self._buf_put(node_id, "data", json.dumps(data, separators=(",", ":")))
 
     def _get_data(self, node_id: str) -> dict[str, Any] | None:
+        self._flush_buf()
         r = self._g.v(node_id).out("data").all()
         if not r or not r.get("result"):
             return None
@@ -103,13 +133,14 @@ class CogDatabase:
             self._g.delete(node_id, "data", r["result"][0]["id"])
 
     def _get_refs(self, index_key: str) -> list[str]:
+        self._flush_buf()
         r = self._g.v(index_key).out("ref").all()
         if not r or not r.get("result"):
             return []
         return [item["id"] for item in r["result"]]
 
     def _add_ref(self, index_key: str, node_id: str) -> None:
-        self._g.put(index_key, "ref", node_id)
+        self._buf_put(index_key, "ref", node_id)
 
     def _del_ref(self, index_key: str, node_id: str) -> None:
         self._g.delete(index_key, "ref", node_id)
@@ -117,13 +148,26 @@ class CogDatabase:
     # ── File operations ─────────────────────────────────────────────
 
     def insert_file(self, path: str, language: str, file_hash: str, lines_of_code: int, tokens: int) -> int:
+        cached_id = self._file_path_cache.get(path)
+        if cached_id is not None:
+            node_id = f"file:{cached_id}"
+            self._flush_buf()
+            data = self._get_data(node_id)
+            if data is not None:
+                data.update(language=language, hash=file_hash, lines_of_code=lines_of_code, tokens=tokens)
+                self._delete_data(node_id)
+                self._put_data(node_id, data)
+                return cached_id
+
         existing = self._find_file_node(path)
         if existing is not None:
             node_id, data = existing
             data.update(language=language, hash=file_hash, lines_of_code=lines_of_code, tokens=tokens)
             self._delete_data(node_id)
             self._put_data(node_id, data)
-            return int(data["id"])
+            fid = int(data["id"])
+            self._file_path_cache[path] = fid
+            return fid
 
         file_id = self._alloc_id("file")
         node_id = f"file:{file_id}"
@@ -138,19 +182,31 @@ class CogDatabase:
         self._put_data(node_id, data)
         self._add_ref(f"_idx:fp:{path}", node_id)
         self._add_ref("_all:files", node_id)
+        self._file_path_cache[path] = file_id
         return file_id
 
     def _find_file_node(self, path: str) -> tuple[str, dict[str, Any]] | None:
+        self._flush_buf()
         refs = self._get_refs(f"_idx:fp:{path}")
         if not refs:
+            self._file_path_cache[path] = None  # negative cache
             return None
         node_id = refs[0]
         data = self._get_data(node_id)
         if data is None:
             return None
+        self._file_path_cache[path] = int(data["id"])
         return node_id, data
 
     def get_file_by_path(self, path: str) -> File | None:
+        cached_id = self._file_path_cache.get(path)
+        if cached_id is None and path in self._file_path_cache:
+            return None  # negative cache hit
+        if cached_id is not None:
+            self._flush_buf()
+            data = self._get_data(f"file:{cached_id}")
+            if data is not None:
+                return self._data_to_file(data)
         result = self._find_file_node(path)
         if result is None:
             return None
@@ -163,12 +219,15 @@ class CogDatabase:
         return self._data_to_file(data)
 
     def get_files(self) -> list[File]:
+        self._flush_buf()
         refs = self._get_refs("_all:files")
         files = []
         for node_id in refs:
             data = self._get_data(node_id)
             if data is not None:
-                files.append(self._data_to_file(data))
+                f = self._data_to_file(data)
+                files.append(f)
+                self._file_path_cache[f.path] = f.id
         return files
 
     @staticmethod
@@ -199,9 +258,10 @@ class CogDatabase:
         scope: str,
         language: str,
     ) -> int:
-        existing_id = self._find_entity(file_id, name, entity_type, start_line)
-        if existing_id is not None:
-            return existing_id
+        cache_key = (file_id, name, entity_type, start_line)
+        cached = self._entity_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         entity_id = self._alloc_id("entity")
         node_id = f"entity:{entity_id}"
@@ -227,15 +287,8 @@ class CogDatabase:
         self._add_ref(f"_idx:ef:{file_id}", node_id)
         self._add_ref(f"_idx:en:{name}", node_id)
         self._add_ref("_all:entities", node_id)
+        self._entity_cache[cache_key] = entity_id
         return entity_id
-
-    def _find_entity(self, file_id: int, name: str, entity_type: str, start_line: int) -> int | None:
-        refs = self._get_refs(f"_idx:ef:{file_id}")
-        for node_id in refs:
-            data = self._get_data(node_id)
-            if data and data["name"] == name and data["type"] == entity_type and int(data["start_line"]) == start_line:
-                return int(data["id"])
-        return None
 
     def get_entities_by_file(self, file_id: int) -> list[Entity]:
         refs = self._get_refs(f"_idx:ef:{file_id}")
@@ -276,9 +329,13 @@ class CogDatabase:
             data = self._get_data(node_id)
             if data is not None:
                 name = data["name"]
+                entity_type = data["type"]
+                start_line = int(data["start_line"])
+                entity_id = int(data["id"])
                 self._del_ref(f"_idx:en:{name}", node_id)
                 self._del_ref("_all:entities", node_id)
-                self._delete_relations_for_entity(int(data["id"]))
+                self._delete_relations_for_entity(entity_id)
+                self._entity_cache.pop((file_id, name, entity_type, start_line), None)
             self._delete_data(node_id)
             self._del_ref(f"_idx:ef:{file_id}", node_id)
 
@@ -288,11 +345,13 @@ class CogDatabase:
             for node_id in refs:
                 data = self._get_data(node_id)
                 if data is not None:
-                    src = data["source_entity_id"]
-                    tgt = data["target_entity_id"]
+                    src = int(data["source_entity_id"])
+                    tgt = int(data["target_entity_id"])
+                    rtype = data["relation_type"]
                     self._del_ref(f"_idx:rs:{src}", node_id)
                     self._del_ref(f"_idx:rt:{tgt}", node_id)
                     self._del_ref("_all:relations", node_id)
+                    self._rel_cache.pop((src, tgt, rtype), None)
                 self._delete_data(node_id)
 
     @staticmethod
@@ -319,9 +378,10 @@ class CogDatabase:
     # ── Dependency operations ───────────────────────────────────────
 
     def insert_dependency(self, source_file_id: int, target_path: str, dep_type: str, line_number: int) -> int:
-        existing_id = self._find_dep(source_file_id, target_path, dep_type, line_number)
-        if existing_id is not None:
-            return existing_id
+        cache_key = (source_file_id, target_path, dep_type, line_number)
+        cached = self._dep_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         dep_id = self._alloc_id("dep")
         node_id = f"dep:{dep_id}"
@@ -337,20 +397,8 @@ class CogDatabase:
         self._put_data(node_id, data)
         self._add_ref(f"_idx:df:{source_file_id}", node_id)
         self._add_ref("_all:deps", node_id)
+        self._dep_cache[cache_key] = dep_id
         return dep_id
-
-    def _find_dep(self, source_file_id: int, target_path: str, dep_type: str, line_number: int) -> int | None:
-        refs = self._get_refs(f"_idx:df:{source_file_id}")
-        for node_id in refs:
-            data = self._get_data(node_id)
-            if (
-                data
-                and data["target_path"] == target_path
-                and data["import_type"] == dep_type
-                and int(data["line_number"]) == line_number
-            ):
-                return int(data["id"])
-        return None
 
     def get_dependencies(self, file_id: int) -> list[Dependency]:
         refs = self._get_refs(f"_idx:df:{file_id}")
@@ -373,6 +421,15 @@ class CogDatabase:
     def delete_dependencies_by_file(self, file_id: int) -> None:
         refs = self._get_refs(f"_idx:df:{file_id}")
         for node_id in refs:
+            data = self._get_data(node_id)
+            if data is not None:
+                cache_key = (
+                    int(data["source_file_id"]),
+                    data["target_path"],
+                    data["import_type"],
+                    int(data["line_number"]),
+                )
+                self._dep_cache.pop(cache_key, None)
             self._delete_data(node_id)
             self._del_ref(f"_idx:df:{file_id}", node_id)
             self._del_ref("_all:deps", node_id)
@@ -399,9 +456,10 @@ class CogDatabase:
         line_number: int,
         context: str,
     ) -> int:
-        existing_id = self._find_relation(source_entity_id, target_entity_id, relation_type)
-        if existing_id is not None:
-            return existing_id
+        cache_key = (source_entity_id, target_entity_id, relation_type)
+        cached = self._rel_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         rel_id = self._alloc_id("rel")
         node_id = f"rel:{rel_id}"
@@ -417,19 +475,8 @@ class CogDatabase:
         self._add_ref(f"_idx:rs:{source_entity_id}", node_id)
         self._add_ref(f"_idx:rt:{target_entity_id}", node_id)
         self._add_ref("_all:relations", node_id)
+        self._rel_cache[cache_key] = rel_id
         return rel_id
-
-    def _find_relation(self, source_id: int, target_id: int, relation_type: str) -> int | None:
-        refs = self._get_refs(f"_idx:rs:{source_id}")
-        for node_id in refs:
-            data = self._get_data(node_id)
-            if (
-                data
-                and int(data["target_entity_id"]) == target_id
-                and data["relation_type"] == relation_type
-            ):
-                return int(data["id"])
-        return None
 
     def get_entity_relations(self, entity_id: int, relation_type: str = "") -> list[EntityRelation]:
         refs = self._get_refs(f"_idx:rs:{entity_id}")

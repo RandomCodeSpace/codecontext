@@ -110,8 +110,9 @@ codecontext web 8080
 ```
 
 Backend note:
-- Default backend: `cogdb` (cross-platform, works on Windows, Linux, and macOS)
-- Alternative backend: `sqlite` (use `-backend sqlite` to switch)
+- Default backend: `sqlite` (fastest, cross-platform)
+- Alternative backend: `cogdb` (graph database, use `-backend cogdb` to switch)
+- Both backends work on all platforms (Windows, Linux, macOS)
 
 CI enforces this on both Linux and Windows via `.github/workflows/test-cli.yml`.
 
