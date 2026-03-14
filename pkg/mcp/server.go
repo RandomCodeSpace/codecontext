@@ -539,16 +539,21 @@ func entityDoc(e *db.Entity) map[string]interface{} {
 // HTTP transport
 // --------------------------------------------------------------------------
 
-// ListenHTTP starts an HTTP MCP server using the official SDK's Streamable HTTP handler.
-func (s *Server) ListenHTTP(addr string) error {
-	handler := mcpsdk.NewStreamableHTTPHandler(
+// Handler returns the Streamable HTTP handler for the MCP endpoint.
+// Use this to mount /mcp on a shared mux (e.g. with the web UI).
+func (s *Server) Handler() http.Handler {
+	return mcpsdk.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcpsdk.Server {
 			return s.inner
 		},
 		nil,
 	)
+}
+
+// ListenHTTP starts an HTTP MCP server using the official SDK's Streamable HTTP handler.
+func (s *Server) ListenHTTP(addr string) error {
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", handler)
+	mux.Handle("/mcp", s.Handler())
 	return http.ListenAndServe(addr, mux)
 }
 

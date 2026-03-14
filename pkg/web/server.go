@@ -29,14 +29,20 @@ func New(idx *indexer.Indexer) *Server {
 	return &Server{idx: idx}
 }
 
-// Listen starts the HTTP server on addr (e.g. ":8080").
-func (s *Server) Listen(addr string) error {
-	mux := http.NewServeMux()
+// Routes registers all web UI routes on mux.
+// Use this to mount the web UI on a shared mux (e.g. alongside MCP).
+func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.handleUI)
 	mux.HandleFunc("/api/graph", s.handleGraph)
 	mux.HandleFunc("/api/stats", s.handleStats)
 	mux.HandleFunc("/api/tree", s.handleTree)
 	mux.HandleFunc("/api/dir", s.handleDirDetail)
+}
+
+// Listen starts the HTTP server on addr (e.g. ":8080").
+func (s *Server) Listen(addr string) error {
+	mux := http.NewServeMux()
+	s.Routes(mux)
 	return http.ListenAndServe(addr, mux)
 }
 

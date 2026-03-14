@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,7 @@ Commands:
   docs                 Generate documentation for the whole project
   stats                Show graph statistics
   web                  Start web UI to visualise the code graph
+  serve                Start web UI + MCP HTTP server on the same port
   mcp                  Start MCP server (for Claude integration)
 
 Flags:
@@ -69,6 +71,8 @@ Examples:
   codecontext docs -ai -prompt "Use JSDoc"   # AI docs with custom style
   codecontext stats                          # show graph statistics
   codecontext web                            # open graph visualisation at http://localhost:8080
+  codecontext serve                          # web UI + MCP HTTP on :8080
+  codecontext serve -addr :9000              # web UI + MCP HTTP on :9000
   codecontext ai query "what does main do"  # AI analysis
   codecontext mcp                            # start MCP server (stdio)
   codecontext mcp -http                      # start MCP server (HTTP on :8081)
@@ -111,6 +115,8 @@ func main() {
 		handleStats(graphDB, *verbose)
 	case "web":
 		handleWeb(graphDB, cmdArgs, *verbose)
+	case "serve":
+		handleServe(graphDB, cmdArgs, *verbose)
 	case "mcp":
 		handleMCP(graphDB, cmdArgs)
 	default:
@@ -470,6 +476,42 @@ func handleWeb(graphDB *string, args []string, verbose bool) {
 	fmt.Println("   Press Ctrl+C to stop")
 	if err := srv.Listen(":" + port); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ web server error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// --------------------------------------------------------------------------
+// serve command — web UI + MCP HTTP on a single port
+// --------------------------------------------------------------------------
+
+func handleServe(graphDB *string, args []string, verbose bool) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	addr := fs.String("addr", ":8080", "listen address")
+	_ = fs.Parse(args)
+
+	fmt.Printf("🔧 Opening database: %s\n", *graphDB)
+	database, err := db.Open(*graphDB, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ error opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+
+	idx := indexer.New(database)
+	idx.SetVerbose(verbose)
+
+	webSrv := web.New(idx)
+	mcpSrv := ccmcp.New(idx, version)
+
+	mux := http.NewServeMux()
+	webSrv.Routes(mux)
+	mux.Handle("/mcp", mcpSrv.Handler())
+
+	fmt.Fprintf(os.Stderr, "🌐 Web UI:    http://localhost%s\n", *addr)
+	fmt.Fprintf(os.Stderr, "🔌 MCP HTTP:  http://localhost%s/mcp\n", *addr)
+	fmt.Fprintln(os.Stderr, "   Press Ctrl+C to stop")
+	if err := http.ListenAndServe(*addr, mux); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ server error: %v\n", err)
 		os.Exit(1)
 	}
 }
