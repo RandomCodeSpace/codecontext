@@ -126,7 +126,7 @@ This repository publishes Python packages through GitHub Actions with:
 
 1. Create project on PyPI:
 	- Create an account on PyPI.
-	- Create a project named `randomcodespace-codecontext`.
+	- Create a project named `ossr-codecontext`.
 
 2. Configure Trusted Publishing on PyPI:
 	- Publisher type: GitHub
@@ -139,7 +139,7 @@ This repository publishes Python packages through GitHub Actions with:
 	- add `license`, `classifiers`, `urls` if needed
 
 Package naming note:
-- PyPI distribution name: `randomcodespace-codecontext`
+- PyPI distribution name: `ossr-codecontext`
 - CLI command: `codecontext`
 - Python import package: `codecontext`
 
@@ -159,7 +159,7 @@ If a release job is re-run for the same version, existing files on PyPI are skip
 Install from PyPI:
 
 ```bash
-pip install randomcodespace-codecontext
+pip install ossr-codecontext
 ```
 
 ## Notes

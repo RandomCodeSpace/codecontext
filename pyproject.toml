@@ -3,7 +3,7 @@ requires = ["setuptools>=70.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "randomcodespace-codecontext"
+name = "ossr-codecontext"
 version = "0.1.0"
 description = "Index source repositories into a code graph with CLI, MCP, Web API/UI, and AI analysis workflows"
 readme = "README.md"

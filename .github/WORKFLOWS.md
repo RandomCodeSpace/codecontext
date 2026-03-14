@@ -52,7 +52,7 @@ uv run python -m codecontext stats
 ```
 
 PyPI distribution name:
-- `randomcodespace-codecontext`
+- `ossr-codecontext`
 
 Runtime names remain:
 - CLI command: `codecontext`
