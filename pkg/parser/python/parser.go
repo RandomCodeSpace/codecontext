@@ -2,11 +2,10 @@
 package python
 
 import (
-	"context"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/python"
+	sitter "github.com/odvcencio/gotreesitter"
+	"github.com/odvcencio/gotreesitter/grammars"
 )
 
 // ParseResult is the output of Parse.
@@ -39,6 +38,8 @@ type Dependency struct {
 // PythonParser is the entry point for Python source files.
 type PythonParser struct{}
 
+var pythonLang = grammars.PythonLanguage()
+
 // Parse parses a Python source file using tree-sitter.
 func (p *PythonParser) Parse(filePath string, content string) (*ParseResult, error) {
 	result := &ParseResult{
@@ -48,10 +49,16 @@ func (p *PythonParser) Parse(filePath string, content string) (*ParseResult, err
 	}
 
 	src := []byte(content)
-	parser := sitter.NewParser()
-	parser.SetLanguage(python.GetLanguage())
+	entry := grammars.DetectLanguage("x.py")
+	parser := sitter.NewParser(pythonLang)
 
-	tree, err := parser.ParseCtx(context.Background(), nil, src)
+	var tree *sitter.Tree
+	var err error
+	if entry != nil && entry.TokenSourceFactory != nil {
+		tree, err = parser.ParseWithTokenSource(src, entry.TokenSourceFactory(src, pythonLang))
+	} else {
+		tree, err = parser.Parse(src)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +72,7 @@ func (p *PythonParser) Parse(filePath string, content string) (*ParseResult, err
 func walkPython(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
-		switch child.Type() {
+		switch child.Type(pythonLang) {
 		case "import_statement":
 			extractPyImport(child, src, result)
 		case "import_from_statement":
@@ -84,7 +91,7 @@ func walkPython(node *sitter.Node, src []byte, parentClass string, result *Parse
 func extractDecorated(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
-		switch child.Type() {
+		switch child.Type(pythonLang) {
 		case "class_definition":
 			extractPyClass(child, src, parentClass, result)
 		case "function_definition":
@@ -100,13 +107,13 @@ func extractPyImport(node *sitter.Node, src []byte, result *ParseResult) {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
 		var path string
-		switch child.Type() {
+		switch child.Type(pythonLang) {
 		case "dotted_name":
-			path = child.Content(src)
+			path = child.Text(src)
 		case "aliased_import":
 			// The first named child is the dotted_name.
 			if child.NamedChildCount() > 0 {
-				path = child.NamedChild(0).Content(src)
+				path = child.NamedChild(0).Text(src)
 			}
 		}
 		if path != "" {
@@ -127,8 +134,8 @@ func extractPyFromImport(node *sitter.Node, src []byte, result *ParseResult) {
 	var path string
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
-		if child.Type() == "dotted_name" || child.Type() == "relative_import" {
-			path = child.Content(src)
+		if child.Type(pythonLang) == "dotted_name" || child.Type(pythonLang) == "relative_import" {
+			path = child.Text(src)
 			break
 		}
 	}
@@ -144,11 +151,11 @@ func extractPyFromImport(node *sitter.Node, src []byte, result *ParseResult) {
 
 // extractPyClass extracts a class and its methods.
 func extractPyClass(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
-	nameNode := node.ChildByFieldName("name")
+	nameNode := node.ChildByFieldName("name", pythonLang)
 	if nameNode == nil {
 		return
 	}
-	name := nameNode.Content(src)
+	name := nameNode.Text(src)
 	startLine := int(node.StartPoint().Row) + 1
 	endLine := int(node.EndPoint().Row) + 1
 
@@ -165,7 +172,7 @@ func extractPyClass(node *sitter.Node, src []byte, parentClass string, result *P
 	})
 
 	// Walk class body for methods and nested classes.
-	body := node.ChildByFieldName("body")
+	body := node.ChildByFieldName("body", pythonLang)
 	if body != nil {
 		walkPython(body, src, name, result)
 	}
@@ -173,11 +180,11 @@ func extractPyClass(node *sitter.Node, src []byte, parentClass string, result *P
 
 // extractPyFunc extracts a function or method.
 func extractPyFunc(node *sitter.Node, src []byte, parentClass string, _ bool, result *ParseResult) {
-	nameNode := node.ChildByFieldName("name")
+	nameNode := node.ChildByFieldName("name", pythonLang)
 	if nameNode == nil {
 		return
 	}
-	name := nameNode.Content(src)
+	name := nameNode.Text(src)
 	startLine := int(node.StartPoint().Row) + 1
 	endLine := int(node.EndPoint().Row) + 1
 
@@ -186,7 +193,7 @@ func extractPyFunc(node *sitter.Node, src []byte, parentClass string, _ bool, re
 	// Check if the parent node wraps this in an async context.
 	// In tree-sitter-python, "async def" creates a function_definition node
 	// but the first line text starts with "async".
-	firstLine := node.Content(src)
+	firstLine := node.Text(src)
 	if idx := strings.IndexByte(firstLine, '\n'); idx > 0 {
 		firstLine = firstLine[:idx]
 	}
@@ -206,9 +213,9 @@ func extractPyFunc(node *sitter.Node, src []byte, parentClass string, _ bool, re
 
 	// Build signature from parameters.
 	sig := name
-	params := node.ChildByFieldName("parameters")
+	params := node.ChildByFieldName("parameters", pythonLang)
 	if params != nil {
-		sig = name + params.Content(src)
+		sig = name + params.Text(src)
 	}
 
 	docs := extractPyDocstring(node, src)
@@ -227,19 +234,19 @@ func extractPyFunc(node *sitter.Node, src []byte, parentClass string, _ bool, re
 
 // extractPyDocstring extracts the docstring from a class or function definition.
 func extractPyDocstring(node *sitter.Node, src []byte) string {
-	body := node.ChildByFieldName("body")
+	body := node.ChildByFieldName("body", pythonLang)
 	if body == nil || body.NamedChildCount() == 0 {
 		return ""
 	}
 	first := body.NamedChild(0)
-	if first.Type() != "expression_statement" || first.NamedChildCount() == 0 {
+	if first.Type(pythonLang) != "expression_statement" || first.NamedChildCount() == 0 {
 		return ""
 	}
 	expr := first.NamedChild(0)
-	if expr.Type() != "string" {
+	if expr.Type(pythonLang) != "string" {
 		return ""
 	}
-	raw := expr.Content(src)
+	raw := expr.Text(src)
 	// Strip triple quotes.
 	for _, delim := range []string{`"""`, `'''`} {
 		if strings.HasPrefix(raw, delim) && strings.HasSuffix(raw, delim) {

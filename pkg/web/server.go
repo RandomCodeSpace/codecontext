@@ -174,7 +174,7 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		}
 		candidates := []string{importBase}
 		if filepath.Ext(importBase) == "" {
-			for _, ext := range []string{".go", ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".c", ".h", ".cpp", ".cc", ".hpp"} {
+			for _, ext := range []string{".go", ".py", ".js", ".ts", ".jsx", ".tsx", ".java"} {
 				candidates = append(candidates, importBase+ext)
 			}
 		}
@@ -359,12 +359,12 @@ func buildFileTree(files []*db.File) *treeNode {
 // --------------------------------------------------------------------------
 
 type dirDetail struct {
-	Path        string         `json:"path"`
-	FileCount   int            `json:"fileCount"`
-	ImportsFrom []string       `json:"importsFrom"`
-	ImportedBy  []string       `json:"importedBy"`
-	TopFiles    []string       `json:"topFiles"`
-	TopEntities []entityBrief  `json:"topEntities"`
+	Path        string        `json:"path"`
+	FileCount   int           `json:"fileCount"`
+	ImportsFrom []string      `json:"importsFrom"`
+	ImportedBy  []string      `json:"importedBy"`
+	TopFiles    []string      `json:"topFiles"`
+	TopEntities []entityBrief `json:"topEntities"`
 }
 
 type entityBrief struct {
@@ -493,7 +493,7 @@ func resolveDepToID(targetPath string, baseToPaths map[string][]string, pathToID
 	}
 	candidates := []string{base}
 	if filepath.Ext(base) == "" {
-		for _, ext := range []string{".java", ".go", ".py", ".js", ".ts", ".c", ".h", ".cpp", ".hpp"} {
+		for _, ext := range []string{".java", ".go", ".py", ".js", ".ts"} {
 			candidates = append(candidates, base+ext)
 		}
 	}
@@ -529,7 +529,7 @@ func pathSuffixMatch(filePath, importPath string) bool {
 		return false
 	}
 	// Check if filePath ends with importPath (with or without extension).
-	for _, suffix := range []string{importPath, importPath + ".go", importPath + ".py", importPath + ".js", importPath + ".ts", importPath + ".c", importPath + ".h", importPath + ".cpp", importPath + ".hpp"} {
+	for _, suffix := range []string{importPath, importPath + ".go", importPath + ".py", importPath + ".js", importPath + ".ts"} {
 		if len(filePath) >= len(suffix) && filePath[len(filePath)-len(suffix):] == suffix {
 			return true
 		}

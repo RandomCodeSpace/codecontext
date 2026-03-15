@@ -3,11 +3,10 @@
 package javascript
 
 import (
-	"context"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/javascript"
+	sitter "github.com/odvcencio/gotreesitter"
+	"github.com/odvcencio/gotreesitter/grammars"
 )
 
 // ParseResult is the output of Parse.
@@ -40,6 +39,8 @@ type Dependency struct {
 // JSParser is the entry point.
 type JSParser struct{}
 
+var javascriptLang = grammars.JavascriptLanguage()
+
 // Parse parses a JavaScript or TypeScript source file using tree-sitter.
 func (p *JSParser) Parse(filePath string, content string) (*ParseResult, error) {
 	result := &ParseResult{
@@ -49,10 +50,16 @@ func (p *JSParser) Parse(filePath string, content string) (*ParseResult, error) 
 	}
 
 	src := []byte(content)
-	parser := sitter.NewParser()
-	parser.SetLanguage(javascript.GetLanguage())
+	entry := grammars.DetectLanguage("x.js")
+	parser := sitter.NewParser(javascriptLang)
 
-	tree, err := parser.ParseCtx(context.Background(), nil, src)
+	var tree *sitter.Tree
+	var err error
+	if entry != nil && entry.TokenSourceFactory != nil {
+		tree, err = parser.ParseWithTokenSource(src, entry.TokenSourceFactory(src, javascriptLang))
+	} else {
+		tree, err = parser.Parse(src)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +78,7 @@ func walkJS(node *sitter.Node, src []byte, parentClass string, result *ParseResu
 }
 
 func processJSNode(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
-	switch node.Type() {
+	switch node.Type(javascriptLang) {
 	case "import_statement":
 		extractJSImport(node, src, result)
 	case "class_declaration":
@@ -95,11 +102,11 @@ func processJSNode(node *sitter.Node, src []byte, parentClass string, result *Pa
 // extractJSImport handles: import X from 'path' and import 'path'
 func extractJSImport(node *sitter.Node, src []byte, result *ParseResult) {
 	lineNum := int(node.StartPoint().Row) + 1
-	source := node.ChildByFieldName("source")
+	source := node.ChildByFieldName("source", javascriptLang)
 	if source == nil {
 		return
 	}
-	path := unquote(source.Content(src))
+	path := unquote(source.Text(src))
 	if path != "" {
 		result.Dependencies = append(result.Dependencies, &Dependency{
 			Path:       path,
@@ -112,11 +119,11 @@ func extractJSImport(node *sitter.Node, src []byte, result *ParseResult) {
 
 // extractJSClass extracts a class and its methods.
 func extractJSClass(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
-	nameNode := node.ChildByFieldName("name")
+	nameNode := node.ChildByFieldName("name", javascriptLang)
 	if nameNode == nil {
 		return
 	}
-	name := nameNode.Content(src)
+	name := nameNode.Text(src)
 	startLine := int(node.StartPoint().Row) + 1
 	endLine := int(node.EndPoint().Row) + 1
 
@@ -130,7 +137,7 @@ func extractJSClass(node *sitter.Node, src []byte, parentClass string, result *P
 	})
 
 	// Walk class body for methods.
-	body := node.ChildByFieldName("body")
+	body := node.ChildByFieldName("body", javascriptLang)
 	if body != nil {
 		extractClassMethods(body, src, name, result)
 	}
@@ -140,7 +147,7 @@ func extractJSClass(node *sitter.Node, src []byte, parentClass string, result *P
 func extractClassMethods(body *sitter.Node, src []byte, className string, result *ParseResult) {
 	for i := 0; i < int(body.NamedChildCount()); i++ {
 		child := body.NamedChild(i)
-		switch child.Type() {
+		switch child.Type(javascriptLang) {
 		case "method_definition":
 			extractJSMethod(child, src, className, result)
 		}
@@ -149,17 +156,17 @@ func extractClassMethods(body *sitter.Node, src []byte, className string, result
 
 // extractJSMethod extracts a method from a class body.
 func extractJSMethod(node *sitter.Node, src []byte, className string, result *ParseResult) {
-	nameNode := node.ChildByFieldName("name")
+	nameNode := node.ChildByFieldName("name", javascriptLang)
 	if nameNode == nil {
 		return
 	}
-	name := nameNode.Content(src)
+	name := nameNode.Text(src)
 	startLine := int(node.StartPoint().Row) + 1
 	endLine := int(node.EndPoint().Row) + 1
 
 	// Check for async by inspecting the node text.
 	isAsync := false
-	nodeText := node.Content(src)
+	nodeText := node.Text(src)
 	if idx := strings.IndexByte(nodeText, '\n'); idx > 0 {
 		nodeText = nodeText[:idx]
 	}
@@ -175,9 +182,9 @@ func extractJSMethod(node *sitter.Node, src []byte, className string, result *Pa
 
 	// Build signature.
 	sig := name
-	params := node.ChildByFieldName("parameters")
+	params := node.ChildByFieldName("parameters", javascriptLang)
 	if params != nil {
-		sig = name + params.Content(src)
+		sig = name + params.Text(src)
 	}
 
 	result.Entities = append(result.Entities, &Entity{
@@ -193,17 +200,17 @@ func extractJSMethod(node *sitter.Node, src []byte, className string, result *Pa
 
 // extractJSFuncDecl handles: [async] function name(params)
 func extractJSFuncDecl(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
-	nameNode := node.ChildByFieldName("name")
+	nameNode := node.ChildByFieldName("name", javascriptLang)
 	if nameNode == nil {
 		return
 	}
-	name := nameNode.Content(src)
+	name := nameNode.Text(src)
 	startLine := int(node.StartPoint().Row) + 1
 	endLine := int(node.EndPoint().Row) + 1
 
 	// Check async.
 	isAsync := false
-	nodeText := node.Content(src)
+	nodeText := node.Text(src)
 	if idx := strings.IndexByte(nodeText, '\n'); idx > 0 {
 		nodeText = nodeText[:idx]
 	}
@@ -225,9 +232,9 @@ func extractJSFuncDecl(node *sitter.Node, src []byte, parentClass string, result
 	}
 
 	sig := name
-	params := node.ChildByFieldName("parameters")
+	params := node.ChildByFieldName("parameters", javascriptLang)
 	if params != nil {
-		sig = name + params.Content(src)
+		sig = name + params.Text(src)
 	}
 
 	result.Entities = append(result.Entities, &Entity{
@@ -246,7 +253,7 @@ func extractJSExport(node *sitter.Node, src []byte, parentClass string, result *
 	// Export wraps declarations. Find the inner declaration.
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
-		switch child.Type() {
+		switch child.Type(javascriptLang) {
 		case "class_declaration":
 			extractJSClass(child, src, parentClass, result)
 		case "function_declaration":
@@ -261,7 +268,7 @@ func extractJSExport(node *sitter.Node, src []byte, parentClass string, result *
 func extractJSLexicalDecl(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
-		if child.Type() != "variable_declarator" {
+		if child.Type(javascriptLang) != "variable_declarator" {
 			continue
 		}
 		extractVarDeclarator(child, src, parentClass, result)
@@ -272,7 +279,7 @@ func extractJSLexicalDecl(node *sitter.Node, src []byte, parentClass string, res
 func extractJSVarDecl(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
 	for i := 0; i < int(node.NamedChildCount()); i++ {
 		child := node.NamedChild(i)
-		if child.Type() != "variable_declarator" {
+		if child.Type(javascriptLang) != "variable_declarator" {
 			continue
 		}
 		extractVarDeclarator(child, src, parentClass, result)
@@ -280,23 +287,23 @@ func extractJSVarDecl(node *sitter.Node, src []byte, parentClass string, result 
 }
 
 func extractVarDeclarator(node *sitter.Node, src []byte, parentClass string, result *ParseResult) {
-	nameNode := node.ChildByFieldName("name")
-	valueNode := node.ChildByFieldName("value")
+	nameNode := node.ChildByFieldName("name", javascriptLang)
+	valueNode := node.ChildByFieldName("value", javascriptLang)
 	if nameNode == nil || valueNode == nil {
 		return
 	}
 
-	name := nameNode.Content(src)
+	name := nameNode.Text(src)
 
 	// Check if value is an arrow function.
 	val := valueNode
 	isAsync := false
-	if val.Type() == "await_expression" || val.Type() == "call_expression" {
+	if val.Type(javascriptLang) == "await_expression" || val.Type(javascriptLang) == "call_expression" {
 		// Check for require() calls
 		extractRequireFromValue(val, src, int(node.StartPoint().Row)+1, result)
 		return
 	}
-	if val.Type() == "arrow_function" {
+	if val.Type(javascriptLang) == "arrow_function" {
 		// Arrow function.
 	} else {
 		// Check for require() in the value.
@@ -305,7 +312,7 @@ func extractVarDeclarator(node *sitter.Node, src []byte, parentClass string, res
 	}
 
 	// Check for async in the node text.
-	declText := node.Content(src)
+	declText := node.Text(src)
 	if idx := strings.IndexByte(declText, '\n'); idx > 0 {
 		declText = declText[:idx]
 	}
@@ -338,13 +345,13 @@ func extractVarDeclarator(node *sitter.Node, src []byte, parentClass string, res
 
 // extractRequireFromValue looks for require('path') calls in a value node.
 func extractRequireFromValue(node *sitter.Node, src []byte, lineNum int, result *ParseResult) {
-	if node.Type() == "call_expression" {
-		fn := node.ChildByFieldName("function")
-		if fn != nil && fn.Content(src) == "require" {
-			args := node.ChildByFieldName("arguments")
+	if node.Type(javascriptLang) == "call_expression" {
+		fn := node.ChildByFieldName("function", javascriptLang)
+		if fn != nil && fn.Text(src) == "require" {
+			args := node.ChildByFieldName("arguments", javascriptLang)
 			if args != nil && args.NamedChildCount() > 0 {
 				arg := args.NamedChild(0)
-				path := unquote(arg.Content(src))
+				path := unquote(arg.Text(src))
 				if path != "" {
 					result.Dependencies = append(result.Dependencies, &Dependency{
 						Path:       path,

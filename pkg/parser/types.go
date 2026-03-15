@@ -9,8 +9,6 @@ const (
 	JavaScript Language = "javascript"
 	TypeScript Language = "typescript"
 	Java       Language = "java"
-	C          Language = "c"
-	Cpp        Language = "cpp"
 )
 
 type ParseResult struct {
@@ -22,18 +20,18 @@ type ParseResult struct {
 
 type Entity struct {
 	Name        string
-	Type        string            // function, class, type, interface, method, etc.
-	Kind        string            // specific: async_function, arrow_function, etc.
+	Type        string // function, class, type, interface, method, etc.
+	Kind        string // specific: async_function, arrow_function, etc.
 	Signature   string
 	StartLine   int
 	EndLine     int
 	ColumnStart int
 	ColumnEnd   int
-	Docs        string            // Documentation/comments
-	Parent      string            // Parent entity name for nested entities
-	Visibility  string            // public, private, protected, internal
-	Scope       string            // global, class, file, module, local
-	Language    Language          // go, python, javascript, java
+	Docs        string                 // Documentation/comments
+	Parent      string                 // Parent entity name for nested entities
+	Visibility  string                 // public, private, protected, internal
+	Scope       string                 // global, class, file, module, local
+	Language    Language               // go, python, javascript, java
 	Attributes  map[string]interface{} // Language-specific metadata
 }
 

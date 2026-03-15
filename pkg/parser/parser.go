@@ -1,21 +1,20 @@
 package parser
 
 import (
-	"path/filepath"
+	"strconv"
 	"strings"
 
-	cparser "github.com/RandomCodeSpace/codecontext/pkg/parser/c"
-	cppparser "github.com/RandomCodeSpace/codecontext/pkg/parser/cpp"
 	goparser "github.com/RandomCodeSpace/codecontext/pkg/parser/go"
 	javaparser "github.com/RandomCodeSpace/codecontext/pkg/parser/java"
 	jsparser "github.com/RandomCodeSpace/codecontext/pkg/parser/javascript"
 	pyparser "github.com/RandomCodeSpace/codecontext/pkg/parser/python"
+	sitter "github.com/odvcencio/gotreesitter"
+	"github.com/odvcencio/gotreesitter/grammars"
 )
 
 // Parse routes to the appropriate language parser
 func Parse(filePath string, content string) (*ParseResult, error) {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	lang := detectLanguage(ext)
+	lang := detectLanguage(filePath)
 
 	switch lang {
 	case Go:
@@ -50,29 +49,18 @@ func Parse(filePath string, content string) (*ParseResult, error) {
 		}
 		return convertJavaParseResult(filePath, result), nil
 
-	case C:
-		parser := &cparser.CParser{}
-		result, err := parser.Parse(filePath, content)
-		if err != nil {
-			return nil, err
-		}
-		return convertCParseResult(filePath, result), nil
-
-	case Cpp:
-		parser := &cppparser.CppParser{}
-		result, err := parser.Parse(filePath, content)
-		if err != nil {
-			return nil, err
-		}
-		return convertCppParseResult(filePath, result), nil
-
 	default:
-		return &ParseResult{
-			FilePath:     filePath,
-			Language:     "unknown",
-			Entities:     []*Entity{},
-			Dependencies: []*Dependency{},
-		}, nil
+		if lang == "" {
+			lang = "unknown"
+			return &ParseResult{
+				FilePath:     filePath,
+				Language:     lang,
+				Entities:     []*Entity{},
+				Dependencies: []*Dependency{},
+			}, nil
+		}
+
+		return parseGenericWithTags(filePath, content, lang)
 	}
 }
 
@@ -185,70 +173,111 @@ func convertJavaParseResult(filePath string, result *javaparser.ParseResult) *Pa
 	}
 	return main
 }
-
-// convertCParseResult converts a C sub-parser result to the main ParseResult.
-func convertCParseResult(filePath string, result *cparser.ParseResult) *ParseResult {
-	main := &ParseResult{
-		FilePath:     filePath,
-		Language:     C,
-		Entities:     make([]*Entity, len(result.Entities)),
-		Dependencies: make([]*Dependency, len(result.Dependencies)),
-	}
-	for i, e := range result.Entities {
-		main.Entities[i] = &Entity{
-			Name: e.Name, Type: e.Type, Kind: e.Kind,
-			Signature: e.Signature, StartLine: e.StartLine, EndLine: e.EndLine,
-			Docs: e.Docs, Parent: e.Parent, Language: C,
-		}
-	}
-	for i, d := range result.Dependencies {
-		main.Dependencies[i] = &Dependency{
-			Path: d.Path, Type: d.Type, LineNumber: d.LineNumber, IsLocal: d.IsLocal,
-		}
-	}
-	return main
-}
-
-// convertCppParseResult converts a C++ sub-parser result to the main ParseResult.
-func convertCppParseResult(filePath string, result *cppparser.ParseResult) *ParseResult {
-	main := &ParseResult{
-		FilePath:     filePath,
-		Language:     Cpp,
-		Entities:     make([]*Entity, len(result.Entities)),
-		Dependencies: make([]*Dependency, len(result.Dependencies)),
-	}
-	for i, e := range result.Entities {
-		main.Entities[i] = &Entity{
-			Name: e.Name, Type: e.Type, Kind: e.Kind,
-			Signature: e.Signature, StartLine: e.StartLine, EndLine: e.EndLine,
-			Docs: e.Docs, Parent: e.Parent, Language: Cpp,
-		}
-	}
-	for i, d := range result.Dependencies {
-		main.Dependencies[i] = &Dependency{
-			Path: d.Path, Type: d.Type, LineNumber: d.LineNumber, IsLocal: d.IsLocal,
-		}
-	}
-	return main
-}
-
-func detectLanguage(ext string) Language {
-	switch ext {
-	case ".go":
-		return Go
-	case ".py":
-		return Python
-	case ".js", ".jsx":
-		return JavaScript
-	case ".ts", ".tsx":
-		return TypeScript
-	case ".java":
-		return Java
-	case ".c", ".h":
-		return C
-	case ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".hh":
-		return Cpp
-	default:
+func detectLanguage(filePath string) Language {
+	entry := grammars.DetectLanguage(filePath)
+	if entry == nil {
 		return ""
 	}
+
+	// Keep existing parser routing for the languages with custom entity/dependency extraction.
+	switch entry.Name {
+	case "go":
+		return Go
+	case "python":
+		return Python
+	case "javascript":
+		return JavaScript
+	case "typescript", "tsx":
+		return TypeScript
+	case "java":
+		return Java
+	default:
+		return Language(entry.Name)
+	}
+}
+
+func parseGenericWithTags(filePath string, content string, lang Language) (*ParseResult, error) {
+	result := &ParseResult{
+		FilePath:     filePath,
+		Language:     lang,
+		Entities:     []*Entity{},
+		Dependencies: []*Dependency{},
+	}
+
+	entry := grammars.DetectLanguage(filePath)
+	if entry == nil {
+		return result, nil
+	}
+
+	langDef := entry.Language()
+	src := []byte(content)
+	p := sitter.NewParser(langDef)
+
+	var err error
+	if entry.TokenSourceFactory != nil {
+		_, err = p.ParseWithTokenSource(src, entry.TokenSourceFactory(src, langDef))
+	} else {
+		_, err = p.Parse(src)
+	}
+	if err != nil {
+		// Some grammars may fail on edge inputs; keep indexing resilient.
+		return result, nil
+	}
+
+	tagsQuery := entry.TagsQuery
+	if strings.TrimSpace(tagsQuery) == "" {
+		for _, e := range grammars.AllLanguages() {
+			if e.Name == entry.Name {
+				tagsQuery = e.TagsQuery
+				break
+			}
+		}
+	}
+	if strings.TrimSpace(tagsQuery) == "" {
+		return result, nil
+	}
+
+	tagger, err := sitter.NewTagger(langDef, tagsQuery)
+	if err != nil {
+		return result, nil
+	}
+
+	seen := map[string]bool{}
+	for _, t := range tagger.Tag(src) {
+		if !strings.HasPrefix(t.Kind, "definition.") {
+			continue
+		}
+
+		entityType := strings.TrimPrefix(t.Kind, "definition.")
+		if entityType == "" {
+			entityType = "symbol"
+		}
+
+		startLine := int(t.Range.StartPoint.Row) + 1
+		endLine := int(t.Range.EndPoint.Row) + 1
+		if endLine < startLine {
+			endLine = startLine
+		}
+
+		key := t.Name + "|" + t.Kind + "|" + strconv.Itoa(startLine)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		result.Entities = append(result.Entities, &Entity{
+			Name:        t.Name,
+			Type:        entityType,
+			Kind:        t.Kind,
+			Signature:   t.Name,
+			StartLine:   startLine,
+			EndLine:     endLine,
+			ColumnStart: int(t.NameRange.StartPoint.Column) + 1,
+			ColumnEnd:   int(t.NameRange.EndPoint.Column) + 1,
+			Language:    lang,
+			Scope:       "file",
+		})
+	}
+
+	return result, nil
 }

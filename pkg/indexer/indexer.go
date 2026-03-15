@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/odvcencio/gotreesitter/grammars"
 	gitignore "github.com/sabhiram/go-gitignore"
 
 	"gorm.io/gorm"
@@ -382,12 +383,10 @@ func workers() int {
 }
 
 func isSourceFile(ext string) bool {
-	return map[string]bool{
-		".go": true, ".js": true, ".ts": true, ".jsx": true, ".tsx": true,
-		".py": true, ".java": true,
-		".c": true, ".h": true, ".cpp": true, ".cc": true, ".cxx": true,
-		".hpp": true, ".hxx": true, ".hh": true,
-	}[ext]
+	if ext == "" {
+		return false
+	}
+	return grammars.DetectLanguage("file"+ext) != nil
 }
 
 // --------------------------------------------------------------------------
@@ -423,12 +422,14 @@ func (idx *Indexer) GetStats() (map[string]interface{}, error) {
 	}, nil
 }
 
-func (idx *Indexer) GetAllFiles() ([]*db.File, error)              { return idx.db.GetFiles() }
-func (idx *Indexer) GetAllEntities() ([]*db.Entity, error)         { return idx.db.GetAllEntities() }
+func (idx *Indexer) GetAllFiles() ([]*db.File, error)               { return idx.db.GetFiles() }
+func (idx *Indexer) GetAllEntities() ([]*db.Entity, error)          { return idx.db.GetAllEntities() }
 func (idx *Indexer) GetAllRelations() ([]*db.EntityRelation, error) { return idx.db.GetAllRelations() }
-func (idx *Indexer) GetAllDependencies() ([]*db.Dependency, error)  { return idx.db.GetAllDependencies() }
-func (idx *Indexer) GetFileByID(id int64) (*db.File, error)         { return idx.db.GetFileByID(id) }
-func (idx *Indexer) GetFileByPath(path string) (*db.File, error)    { return idx.db.GetFileByPath(path) }
+func (idx *Indexer) GetAllDependencies() ([]*db.Dependency, error) {
+	return idx.db.GetAllDependencies()
+}
+func (idx *Indexer) GetFileByID(id int64) (*db.File, error)      { return idx.db.GetFileByID(id) }
+func (idx *Indexer) GetFileByPath(path string) (*db.File, error) { return idx.db.GetFileByPath(path) }
 func (idx *Indexer) GetEntitiesByFile(fileID int64) ([]*db.Entity, error) {
 	return idx.db.GetEntitiesByFile(fileID)
 }

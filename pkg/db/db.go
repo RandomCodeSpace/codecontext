@@ -3,7 +3,8 @@ package db
 import (
 	"fmt"
 
-	"gorm.io/driver/sqlite"
+	_ "github.com/ncruces/go-sqlite3/embed"
+	"github.com/ncruces/go-sqlite3/gormlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -20,7 +21,7 @@ func Open(dbPath string, verbose bool) (*Database, error) {
 		logLevel = logger.Info
 	}
 
-	conn, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
+	conn, err := gorm.Open(gormlite.Open(dbPath), &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
 	})
 	if err != nil {

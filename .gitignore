@@ -6,3 +6,6 @@ codecontext
 pulsar-master/
 .claude
 .vscode/
+test/
+codecontext.exe
+codecontext

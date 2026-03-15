@@ -2,11 +2,10 @@
 package java
 
 import (
-	"context"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	"github.com/smacker/go-tree-sitter/java"
+	sitter "github.com/odvcencio/gotreesitter"
+	"github.com/odvcencio/gotreesitter/grammars"
 )
 
 // ParseResult is the output of Parse.
@@ -39,6 +38,8 @@ type Dependency struct {
 // JavaParser is the entry point.
 type JavaParser struct{}
 
+var javaLang = grammars.JavaLanguage()
+
 // Parse parses a Java source file using tree-sitter.
 func (p *JavaParser) Parse(filePath string, content string) (*ParseResult, error) {
 	result := &ParseResult{
@@ -48,10 +49,16 @@ func (p *JavaParser) Parse(filePath string, content string) (*ParseResult, error
 	}
 
 	src := []byte(content)
-	parser := sitter.NewParser()
-	parser.SetLanguage(java.GetLanguage())
+	entry := grammars.DetectLanguage("x.java")
+	parser := sitter.NewParser(javaLang)
 
-	tree, err := parser.ParseCtx(context.Background(), nil, src)
+	var tree *sitter.Tree
+	var err error
+	if entry != nil && entry.TokenSourceFactory != nil {
+		tree, err = parser.ParseWithTokenSource(src, entry.TokenSourceFactory(src, javaLang))
+	} else {
+		tree, err = parser.Parse(src)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +77,7 @@ func walkJava(node *sitter.Node, src []byte, parentType string, result *ParseRes
 }
 
 func processJavaNode(node *sitter.Node, src []byte, parentType string, result *ParseResult) {
-	switch node.Type() {
+	switch node.Type(javaLang) {
 	case "import_declaration":
 		extractJavaImport(node, src, result)
 	case "class_declaration":
@@ -90,7 +97,7 @@ func processJavaNode(node *sitter.Node, src []byte, parentType string, result *P
 func extractJavaImport(node *sitter.Node, src []byte, result *ParseResult) {
 	lineNum := int(node.StartPoint().Row) + 1
 	// The import path is in a scoped_identifier or identifier child.
-	text := node.Content(src)
+	text := node.Text(src)
 	text = strings.TrimPrefix(text, "import ")
 	text = strings.TrimPrefix(text, "static ")
 	text = strings.TrimSuffix(strings.TrimSpace(text), ";")
@@ -105,11 +112,11 @@ func extractJavaImport(node *sitter.Node, src []byte, result *ParseResult) {
 
 // extractJavaType extracts class, interface, enum, or annotation type declarations.
 func extractJavaType(node *sitter.Node, src []byte, parentType, kind string, result *ParseResult) {
-	nameNode := node.ChildByFieldName("name")
+	nameNode := node.ChildByFieldName("name", javaLang)
 	if nameNode == nil {
 		return
 	}
-	name := nameNode.Content(src)
+	name := nameNode.Text(src)
 	startLine := int(node.StartPoint().Row) + 1
 	endLine := int(node.EndPoint().Row) + 1
 
@@ -123,7 +130,7 @@ func extractJavaType(node *sitter.Node, src []byte, parentType, kind string, res
 	})
 
 	// Walk body for methods and nested types.
-	body := node.ChildByFieldName("body")
+	body := node.ChildByFieldName("body", javaLang)
 	if body != nil {
 		walkJavaBody(body, src, name, result)
 	}
@@ -143,23 +150,23 @@ func extractJavaMethod(node *sitter.Node, src []byte, parentType string, result 
 		return
 	}
 
-	nameNode := node.ChildByFieldName("name")
+	nameNode := node.ChildByFieldName("name", javaLang)
 	if nameNode == nil {
 		return
 	}
-	name := nameNode.Content(src)
+	name := nameNode.Text(src)
 	startLine := int(node.StartPoint().Row) + 1
 	endLine := int(node.EndPoint().Row) + 1
 
 	// Build signature: return_type name(params)
 	sig := name
-	retType := node.ChildByFieldName("type")
-	params := node.ChildByFieldName("parameters")
+	retType := node.ChildByFieldName("type", javaLang)
+	params := node.ChildByFieldName("parameters", javaLang)
 	if retType != nil {
-		sig = retType.Content(src) + " " + name
+		sig = retType.Text(src) + " " + name
 	}
 	if params != nil {
-		sig += params.Content(src)
+		sig += params.Text(src)
 	} else {
 		sig += "()"
 	}
