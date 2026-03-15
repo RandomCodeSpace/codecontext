@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -267,6 +268,7 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 
 	// Collect all source file paths, respecting ignore rules along the way.
 	var paths []string
+	languageCounts := make(map[string]int)
 	err := filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -299,6 +301,8 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 		}
 		if isSourceFile(strings.ToLower(filepath.Ext(path))) {
 			paths = append(paths, path)
+			langName := scannedLanguage(path)
+			languageCounts[langName]++
 		}
 		return nil
 	})
@@ -308,6 +312,7 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 
 	total := len(paths)
 	fmt.Printf("  🗂️  Found %d source files — indexing with %d workers\n", total, workers())
+	printLanguageScanSummary(languageCounts)
 
 	// Worker pool: feed file paths through a channel.
 	pathCh := make(chan string, total)
@@ -367,6 +372,38 @@ func (idx *Indexer) IndexDirectory(dirPath string) error {
 		fmt.Printf("     ❌ Errors:  %d\n", errs)
 	}
 	return nil
+}
+
+func scannedLanguage(path string) string {
+	entry := grammars.DetectLanguage(path)
+	if entry == nil || strings.TrimSpace(entry.Name) == "" {
+		return "unknown"
+	}
+	return entry.Name
+}
+
+func printLanguageScanSummary(languageCounts map[string]int) {
+	type langCount struct {
+		name  string
+		count int
+	}
+
+	counts := make([]langCount, 0, len(languageCounts))
+	for name, count := range languageCounts {
+		counts = append(counts, langCount{name: name, count: count})
+	}
+
+	sort.Slice(counts, func(i, j int) bool {
+		if counts[i].count == counts[j].count {
+			return counts[i].name < counts[j].name
+		}
+		return counts[i].count > counts[j].count
+	})
+
+	fmt.Printf("  🌐 Languages scanned: %d\n", len(counts))
+	for _, lc := range counts {
+		fmt.Printf("     🧩 %-16s %d files\n", lc.name, lc.count)
+	}
 }
 
 // workers returns the number of parallel indexing goroutines to use.
